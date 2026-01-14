@@ -27,3 +27,9 @@ Data/Output_drawings/*.pdf
 .pytest_cache/
 .coverage
 htmlcov/
+
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.env
