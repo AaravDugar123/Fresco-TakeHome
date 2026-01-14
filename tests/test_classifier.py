@@ -29,7 +29,8 @@ analysis = analyze_geometry(
 print("Classifying swing doors...")
 swing_doors = classify_swing_doors(
     analysis['door_candidate_arcs'],  # Use pre-filtered arcs
-    analysis['filtered_lines']
+    analysis['filtered_lines'],
+    debug=True  # Enable debug output
 )
 
 print(f"\nFound {len(swing_doors)} swing doors")

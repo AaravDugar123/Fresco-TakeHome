@@ -54,7 +54,7 @@ def get_bezier_radius(control_points: List) -> Optional[Tuple[float, np.ndarray]
     return (radius, mid)
 
 
-def separate_walls_and_doors(lines: List[Dict], arcs: List[Dict], door_min_percentile: float = 20, door_max_percentile: float = 60, thick_percentile: float = 70, min_length_percentile: float = 15) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+def separate_walls_and_doors(lines: List[Dict], arcs: List[Dict], door_min_percentile: float = 25, door_max_percentile: float = 65, thick_percentile: float = 70, min_length_percentile: float = 20) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
     Separate walls from door candidates in one pass.
 
@@ -80,8 +80,8 @@ def separate_walls_and_doors(lines: List[Dict], arcs: List[Dict], door_min_perce
     min_threshold = np.percentile(all_strokes, door_min_percentile)
     max_threshold = np.percentile(all_strokes, door_max_percentile)
     thick_threshold = np.percentile(all_strokes, thick_percentile)
-    arc_min_threshold = np.percentile(all_strokes, 8)
-    arc_max_threshold = np.percentile(all_strokes,50)
+    arc_min_threshold = np.percentile(all_strokes, 5)
+    arc_max_threshold = np.percentile(all_strokes,45)
 
     # Pre-compute line lengths once for efficiency
     line_data = []
