@@ -1,4 +1,4 @@
-"""Wall detection and door candidate generation from geometry."""
+"""Door candidate generation from geometry."""
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 
@@ -54,58 +54,100 @@ def get_bezier_radius(control_points: List) -> Optional[Tuple[float, np.ndarray]
     return (radius, mid)
 
 
-def separate_walls_and_doors(lines: List[Dict], arcs: List[Dict], door_min_percentile: float = 0, door_max_percentile: float = 100, thick_percentile: float = 70, min_length_percentile: float = 50) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: float, page_height: float) -> Tuple[List[Dict], List[Dict]]:
     """
-    Separate walls from door candidates in one pass.
+    Filter door candidates by stroke width.
 
-    Doors are medium strokes (0-100th percentile), walls are thick lines.
-    No length filtering - testing if stroke width is the issue.
+    Filters lines and arcs to find potential door components based on stroke width.
+    Removes dust (very short) and extremely long lines/arcs before calculating percentiles.
 
     Args:
         lines: List of line dictionaries
         arcs: List of arc dictionaries
-        door_min_percentile: Minimum percentile for door strokes (default 0)
-        door_max_percentile: Maximum percentile for door strokes (default 100)
-        thick_percentile: Percentile for thick strokes (walls)
-        min_length_percentile: Not used (kept for compatibility)
+        page_width: Width of the PDF page
+        page_height: Height of the PDF page
 
     Returns:
-        Tuple of (walls, door_lines, door_arcs)
+        Tuple of (door_lines, door_arcs)
     """
     if not lines and not arcs:
-        return [], lines, arcs
+        return lines, arcs
 
-    all_strokes = [l['stroke_width']
-                   for l in lines] + [a['stroke_width'] for a in arcs]
+    # Calculate thresholds relative to page size
+    page_diagonal = np.sqrt(page_width**2 + page_height**2)
+    MIN_LENGTH = page_diagonal * 0.0005  # 0.05% of page diagonal (dust)
+    MAX_LENGTH = page_diagonal * 0.06  # 6% of page diagonal (extremely long)
+
+    # Filter out dust and extremely long lines
+    filtered_lines = []
+    for line in lines:
+        start = np.array(line['start'])
+        end = np.array(line['end'])
+        length = np.linalg.norm(end - start)
+        if MIN_LENGTH <= length <= MAX_LENGTH:
+            filtered_lines.append(line)
+
+    # Filter out dust and extremely long arcs (using chord length)
+    filtered_arcs_for_percentile = []
+    for arc in arcs:
+        control_points = arc['control_points']
+        if len(control_points) == 4:
+            p0 = np.array(control_points[0])
+            p3 = np.array(control_points[3])
+            chord_length = np.linalg.norm(p3 - p0)
+            if MIN_LENGTH <= chord_length <= MAX_LENGTH:
+                filtered_arcs_for_percentile.append(arc)
+
+    # Hardcoded percentiles for door filtering
+    door_min_percentile = 20
+    door_max_percentile = 100
+
+    # Calculate thresholds using filtered geometry only (no dust, no extremely long)
+    line_strokes = [l['stroke_width'] for l in filtered_lines]
+    arc_strokes = [a['stroke_width'] for a in filtered_arcs_for_percentile]
+    all_strokes = line_strokes + arc_strokes
+
+    if not all_strokes:
+        return [], []
+
     min_threshold = np.percentile(all_strokes, door_min_percentile)
     max_threshold = np.percentile(all_strokes, door_max_percentile)
-    thick_threshold = np.percentile(all_strokes, thick_percentile)
-    arc_min_threshold = np.percentile(all_strokes, 0)
-    arc_max_threshold = np.percentile(all_strokes, 100)
 
-    walls = []
+    # Calculate arc thresholds based on ARC stroke widths only, not combined
+    if arc_strokes:
+        arc_min_threshold = np.percentile(arc_strokes, 20)
+        arc_max_threshold = np.percentile(arc_strokes, 90)
+        print(
+            f"DEBUG filter_door_candidates: Arc stroke width range: min={min(arc_strokes):.3f}, max={max(arc_strokes):.3f}, 40th={arc_min_threshold:.3f}, 80th={arc_max_threshold:.3f}")
+    else:
+        arc_min_threshold = 0
+        arc_max_threshold = 0
+
     door_lines = []
     door_arcs = []
 
-    # Separate lines into walls and door candidates - NO LENGTH FILTERING
-    for line in lines:
+    # Filter lines by stroke width (using already length-filtered lines)
+    for line in filtered_lines:
         stroke_width = line['stroke_width']
-        # Door candidates: all strokes (0-100th percentile)
         if min_threshold <= stroke_width <= max_threshold:
             door_lines.append(line)
-        # Walls: thick strokes
-        elif stroke_width >= thick_threshold:
-            walls.append(line)
 
-    # Separate arcs into door candidates - ALL ARCS (0-100th percentile)
-    for arc in arcs:
+    # Filter arcs by stroke width (using already length-filtered arcs)
+    arcs_filtered_out = 0
+    for arc in filtered_arcs_for_percentile:
         if arc_min_threshold <= arc['stroke_width'] <= arc_max_threshold:
             door_arcs.append(arc)
+        else:
+            arcs_filtered_out += 1
 
-    return walls, door_lines, door_arcs
+    if arcs_filtered_out > 0:
+        print(
+            f"DEBUG filter_door_candidates: Filtered out {arcs_filtered_out} arcs, kept {len(door_arcs)} arcs")
+
+    return door_lines, door_arcs
 
 
-def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dict]) -> Dict:
+def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dict], page_width: float, page_height: float) -> Dict:
     """
     Analyze geometry to find door candidates.
 
@@ -113,19 +155,20 @@ def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dic
         lines: List of line dictionaries
         arcs: List of arc dictionaries
         dashed_lines: List of dashed line dictionaries
+        page_width: Width of the PDF page
+        page_height: Height of the PDF page
 
     Returns:
         Dictionary with filtered lines, arcs, and door candidates
     """
-    # Step 1: Separate walls from door candidates (combines wall detection and filtering)
     # Combine solid and dashed lines - door panels can be either
     all_lines = lines + dashed_lines
-    walls, filtered_lines, filtered_arcs = separate_walls_and_doors(
-        all_lines, arcs)
+
+    filtered_lines, filtered_arcs = filter_door_candidates(
+        all_lines, arcs, page_width, page_height)
 
     print(
         f"DEBUG analyze_geometry: Number of filtered lines: {len(filtered_lines)}")
-    print(f"DEBUG analyze_geometry: Number of walls: {len(walls)}")
     print(
         f"DEBUG analyze_geometry: Number of filtered arcs: {len(filtered_arcs)}")
 
@@ -133,6 +176,5 @@ def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dic
         "filtered_lines": filtered_lines,
         "filtered_arcs": filtered_arcs,
         "door_candidate_arcs": filtered_arcs,  # Use filtered arcs directly
-        "dashed_lines": dashed_lines,
-        "walls": walls
+        "dashed_lines": dashed_lines
     }

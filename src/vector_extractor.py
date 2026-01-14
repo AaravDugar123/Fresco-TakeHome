@@ -47,6 +47,7 @@ def extract_primitives(page: pymupdf.Page) -> Tuple[List[Dict], List[Dict], List
         stroke_width = path.get("width", 1)
         is_dashed = path.get("dashes") is not None
         path_rect = path.get("rect")  # Bounding box of entire path
+        close_path = path.get("closePath", False)  # Check if path is closed (circle)
 
         for item in path["items"]:
             if item[0] == "l":  # line
@@ -70,7 +71,8 @@ def extract_primitives(page: pymupdf.Page) -> Tuple[List[Dict], List[Dict], List
                     "type": "cubic_bezier",
                     "control_points": [p0, p1, p2, p3],  # Always 4 points
                     "stroke_width": stroke_width,
-                    "path_rect": path_rect
+                    "path_rect": path_rect,
+                    "close_path": close_path  # Store if path is closed (circle)
                 }
                 arcs.append(arc_data)
 

@@ -55,7 +55,7 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold = arc_radius * .3
+    threshold = arc_radius * .25
 
     distances = [
         np.linalg.norm(arc_start - line_start),
@@ -134,7 +134,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
         arc_rect = arc['path_rect']
         arc_x0, arc_y0, arc_x1, arc_y1 = arc_rect
         
-        buffer = arc_radius * .5
+        buffer = arc_radius * .2
         arc_bbox = (arc_x0 - buffer, arc_y0 - buffer, arc_x1 + buffer, arc_y1 + buffer)
             
         for i, line in enumerate(lines):

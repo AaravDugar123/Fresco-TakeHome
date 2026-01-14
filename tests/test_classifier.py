@@ -22,7 +22,9 @@ print("Analyzing geometry...")
 analysis = analyze_geometry(
     result['lines'],
     result['arcs'],
-    result['dashed_lines']
+    result['dashed_lines'],
+    result['page_width'],
+    result['page_height']
 )
 
 # Classify swing doors (use pre-filtered candidates to avoid redundant checks)
