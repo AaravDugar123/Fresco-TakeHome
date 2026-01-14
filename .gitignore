@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Output files
+Data/Output_drawings/*.png
+Data/Output_drawings/*.jpg
+Data/Output_drawings/*.pdf
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
