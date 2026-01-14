@@ -54,20 +54,20 @@ def get_bezier_radius(control_points: List) -> Optional[Tuple[float, np.ndarray]
     return (radius, mid)
 
 
-def separate_walls_and_doors(lines: List[Dict], arcs: List[Dict], door_min_percentile: float = 25, door_max_percentile: float = 65, thick_percentile: float = 70, min_length_percentile: float = 20) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+def separate_walls_and_doors(lines: List[Dict], arcs: List[Dict], door_min_percentile: float = 0, door_max_percentile: float = 100, thick_percentile: float = 70, min_length_percentile: float = 50) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
     Separate walls from door candidates in one pass.
 
-    Doors are medium strokes (20-60th percentile), walls are thick lines.
-    Filters out noise by removing very short lines.
+    Doors are medium strokes (0-100th percentile), walls are thick lines.
+    No length filtering - testing if stroke width is the issue.
 
     Args:
         lines: List of line dictionaries
         arcs: List of arc dictionaries
-        door_min_percentile: Minimum percentile for door strokes (default 20)
-        door_max_percentile: Maximum percentile for door strokes (default 60)
+        door_min_percentile: Minimum percentile for door strokes (default 0)
+        door_max_percentile: Maximum percentile for door strokes (default 100)
         thick_percentile: Percentile for thick strokes (walls)
-        min_length_percentile: Minimum line length as percentage of median length (default 15%)
+        min_length_percentile: Not used (kept for compatibility)
 
     Returns:
         Tuple of (walls, door_lines, door_arcs)
@@ -80,45 +80,24 @@ def separate_walls_and_doors(lines: List[Dict], arcs: List[Dict], door_min_perce
     min_threshold = np.percentile(all_strokes, door_min_percentile)
     max_threshold = np.percentile(all_strokes, door_max_percentile)
     thick_threshold = np.percentile(all_strokes, thick_percentile)
-    arc_min_threshold = np.percentile(all_strokes, 5)
-    arc_max_threshold = np.percentile(all_strokes,45)
-
-    # Pre-compute line lengths once for efficiency
-    line_data = []
-    line_lengths = []
-    for line in lines:
-        start = np.array(line['start'])
-        end = np.array(line['end'])
-        length = np.linalg.norm(end - start)
-        line_lengths.append(length)
-        line_data.append((line, length))
-
-    # Use median length as reference for noise filtering
-    if line_lengths:
-        median_length = np.median(line_lengths)
-        min_length_threshold = median_length * (min_length_percentile / 100.0)
-    else:
-        min_length_threshold = 0
+    arc_min_threshold = np.percentile(all_strokes, 0)
+    arc_max_threshold = np.percentile(all_strokes, 100)
 
     walls = []
     door_lines = []
     door_arcs = []
 
-    # Separate lines into walls and door candidates
-    for line, length in line_data:
-        # Filter out noise: very short lines
-        if length < min_length_threshold:
-            continue
-
+    # Separate lines into walls and door candidates - NO LENGTH FILTERING
+    for line in lines:
         stroke_width = line['stroke_width']
-        # Door candidates: medium strokes (20-60th percentile)
+        # Door candidates: all strokes (0-100th percentile)
         if min_threshold <= stroke_width <= max_threshold:
             door_lines.append(line)
         # Walls: thick strokes
         elif stroke_width >= thick_threshold:
             walls.append(line)
 
-    # Separate arcs into door candidates (arcs are typically door swings, so thin)
+    # Separate arcs into door candidates - ALL ARCS (0-100th percentile)
     for arc in arcs:
         if arc_min_threshold <= arc['stroke_width'] <= arc_max_threshold:
             door_arcs.append(arc)

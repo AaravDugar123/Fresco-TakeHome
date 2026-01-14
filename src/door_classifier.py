@@ -55,7 +55,7 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold = arc_radius * .2
+    threshold = arc_radius * .3
 
     distances = [
         np.linalg.norm(arc_start - line_start),
@@ -68,55 +68,21 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
 
 
 def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np.ndarray, debug: bool = False, arc_idx: int = -1) -> Optional[Dict]:
-    # arc_radius and arc_center are pre-calculated and passed in
-
-    # Step 2: Bounding Box Overlap Check (Fast spatial filter)
-    # Calculate arc bounding box
-    arc_points = arc['control_points']
-    arc_min_x = min(p[0] for p in arc_points)
-    arc_max_x = max(p[0] for p in arc_points)
-    arc_min_y = min(p[1] for p in arc_points)
-    arc_max_y = max(p[1] for p in arc_points)
-    
-    # Add buffer based on arc radius
-    buffer = arc_radius * 0.2
-    arc_bbox = (arc_min_x - buffer, arc_min_y - buffer, arc_max_x + buffer, arc_max_y + buffer)
-    
-    # Calculate line bounding box
-    line_start = line['start']
-    line_end = line['end']
-    line_min_x = min(line_start[0], line_end[0])
-    line_max_x = max(line_start[0], line_end[0])
-    line_min_y = min(line_start[1], line_end[1])
-    line_max_y = max(line_start[1], line_end[1])
-    line_bbox = (line_min_x, line_min_y, line_max_x, line_max_y)
-    
-    # Check overlap
-    if not (arc_bbox[0] <= line_bbox[2] and line_bbox[0] <= arc_bbox[2] and
-            arc_bbox[1] <= line_bbox[3] and line_bbox[1] <= arc_bbox[3]):
-        return None  # No overlap, skip this line
-    
-    # Step 3: Endpoint Distance Check (Touch check)
-    touch_result = check_arc_line_touch(arc, line, arc_radius)
-    if not touch_result:
-        return None
-    
-    # Step 4: Ratio Check (Length vs Radius) - only debug if we got here
+    # Step 2: Ratio Check (Length vs Radius) - Touch check already done in classify_swing_doors
     line_length = np.linalg.norm(np.array(line['end']) - np.array(line['start']))
     ratio = line_length / arc_radius
-    if not (0.6 < ratio < 1.4):  # Within 40%
+    if not (0.6 < ratio < 1.4):
         if debug:
             print(f"  DEBUG: Arc {arc_idx} - Rule 2 failed - Ratio: {ratio:.2f} (line_length={line_length:.2f}, arc_radius={arc_radius:.2f}, required: 0.6-1.4)")
         return None
 
-    # Step 5: Angle Check - only debug if we got here
+    # Step 4: Angle Check
     sweep_angle = calculate_arc_sweep_angle(arc, arc_radius)
     if sweep_angle is None or not (70 <= sweep_angle <= 120):
         if debug:
             print(f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 70-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: None")
         return None
 
-    # All rules passed - this is a swing door
     return {
         "type": "swing_door",
         "arc": arc,
@@ -134,7 +100,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
     Args:
         arcs: List of arc dictionaries
         lines: List of line dictionaries
-        debug: If True, print debug information about rule failures
+        debug: Enable debug output
 
     Returns:
         List of classified swing door dictionaries
@@ -164,32 +130,27 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             closest_bbox_distance = float('inf')
             closest_touch_distance = float('inf')
             
-            # Pre-calculate arc bbox for efficiency
-            arc_points = arc['control_points']
-            arc_min_x = min(p[0] for p in arc_points)
-            arc_max_x = max(p[0] for p in arc_points)
-            arc_min_y = min(p[1] for p in arc_points)
-            arc_max_y = max(p[1] for p in arc_points)
-            buffer = arc_radius * 0.2
-            arc_bbox = (arc_min_x - buffer, arc_min_y - buffer, arc_max_x + buffer, arc_max_y + buffer)
+            # Pre-calculate arc bbox for efficiency using path_rect
+        arc_rect = arc['path_rect']
+        arc_x0, arc_y0, arc_x1, arc_y1 = arc_rect
+        
+        buffer = arc_radius * .5
+        arc_bbox = (arc_x0 - buffer, arc_y0 - buffer, arc_x1 + buffer, arc_y1 + buffer)
             
         for i, line in enumerate(lines):
             if i in used_lines:
                 continue
 
             if debug:
-                lines_checked += 1
-                # Check bbox distance
-                line_start = line['start']
-                line_end = line['end']
-                line_min_x = min(line_start[0], line_end[0])
-                line_max_x = max(line_start[0], line_end[0])
-                line_min_y = min(line_start[1], line_end[1])
-                line_max_y = max(line_start[1], line_end[1])
-                line_bbox = (line_min_x, line_min_y, line_max_x, line_max_y)
-                
-                # Calculate minimum distance between bboxes
-                # Distance is 0 if overlapping, otherwise distance between closest corners
+                lines_checked += 1  # Count ALL lines evaluated
+
+            # Bounding Box Overlap Check (Fast spatial filter)
+            line_rect = line['path_rect']
+            line_x0, line_y0, line_x1, line_y1 = line_rect
+            line_bbox = (line_x0, line_y0, line_x1, line_y1)
+            
+            # Calculate bbox distance for debug (even if it fails)
+            if debug:
                 if (arc_bbox[0] <= line_bbox[2] and line_bbox[0] <= arc_bbox[2] and
                     arc_bbox[1] <= line_bbox[3] and line_bbox[1] <= arc_bbox[3]):
                     bbox_distance = 0  # Overlapping
@@ -202,26 +163,37 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 
                 if bbox_distance < closest_bbox_distance:
                     closest_bbox_distance = bbox_distance
+            
+            if not (arc_bbox[0] <= line_bbox[2] and line_bbox[0] <= arc_bbox[2] and
+                    arc_bbox[1] <= line_bbox[3] and line_bbox[1] <= arc_bbox[3]):
+                continue
+
+            # Check touch using the actual function (for both logic and debug)
+            touch_result = check_arc_line_touch(arc, line, arc_radius)
+            
+            if debug:
+                # Calculate touch distances for debug stats
+                arc_start = arc['control_points'][0]
+                arc_end = arc['control_points'][-1]
+                line_start = line['start']
+                line_end = line['end']
                 
-                if bbox_distance == 0:  # Only check touch if bbox overlaps
-                    # Calculate touch distances
-                    arc_start = arc['control_points'][0]
-                    arc_end = arc['control_points'][-1]
-                    threshold = arc_radius * 0.2
-                    
-                    distances = [
-                        ((arc_start[0] - line_start[0])**2 + (arc_start[1] - line_start[1])**2) ** 0.5,
-                        ((arc_start[0] - line_end[0])**2 + (arc_start[1] - line_end[1])**2) ** 0.5,
-                        ((arc_end[0] - line_start[0])**2 + (arc_end[1] - line_start[1])**2) ** 0.5,
-                        ((arc_end[0] - line_end[0])**2 + (arc_end[1] - line_end[1])**2) ** 0.5
-                    ]
-                    min_touch_dist = min(distances)
-                    
-                    if min_touch_dist < closest_touch_distance:
-                        closest_touch_distance = min_touch_dist
-                    
-                    if min_touch_dist <= threshold:
-                        lines_passed_touch += 1
+                distances = [
+                    ((arc_start[0] - line_start[0])**2 + (arc_start[1] - line_start[1])**2) ** 0.5,
+                    ((arc_start[0] - line_end[0])**2 + (arc_start[1] - line_end[1])**2) ** 0.5,
+                    ((arc_end[0] - line_start[0])**2 + (arc_end[1] - line_start[1])**2) ** 0.5,
+                    ((arc_end[0] - line_end[0])**2 + (arc_end[1] - line_end[1])**2) ** 0.5
+                ]
+                min_touch_dist = min(distances)
+                
+                if min_touch_dist < closest_touch_distance:
+                    closest_touch_distance = min_touch_dist
+                
+                if touch_result:
+                    lines_passed_touch += 1
+            
+            if not touch_result:
+                continue
 
             door = classify_swing_door(arc, line, arc_radius, arc_center, debug=debug, arc_idx=arc_idx)
             if door:
@@ -239,7 +211,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 if closest_bbox_distance < float('inf'):
                     print(f"  Closest bbox distance: {closest_bbox_distance:.2f} (threshold: overlap required)")
                 if closest_touch_distance < float('inf'):
-                    print(f"  Closest touch distance: {closest_touch_distance:.2f} (threshold: {arc_radius * 0.2:.2f})")
+                    print(f"  Closest touch distance: {closest_touch_distance:.2f} (threshold: {arc_radius * 0.8:.2f})")
                 elif lines_passed_bbox == 0:
                     print(f"  Closest bbox distance: {closest_bbox_distance:.2f} (no lines passed bbox check)")
 
