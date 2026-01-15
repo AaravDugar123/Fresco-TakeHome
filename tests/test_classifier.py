@@ -12,7 +12,7 @@ from src.door_classifier import classify_swing_doors
 
 # Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
-    "FirstSource_R25-01360-A-V03.pdf_-_Page_2.pdf"
+    "AC_Convention_Center_ac_cc.pdf_-_Page_122.pdf"
 
 # Start timing
 start_time = time.time()

@@ -224,6 +224,47 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             if not touch_result:
                 continue
 
+            # Filter: Triangle Angle Test - check if arc faces wrong way
+            # For real doors: arc curves AWAY from line (sharp angle ~70-90°)
+            # For false positives: arc curves TOWARD line (wide angle ~120-150°)
+            arc_start = np.array(arc['control_points'][0])
+            arc_end = np.array(arc['control_points'][-1])
+            line_start_arr = np.array(line['start'])
+            line_end_arr = np.array(line['end'])
+            
+            # Find which arc endpoint touches the line (Point A - Hinge)
+            dists = [
+                (np.linalg.norm(arc_start - line_start_arr), arc_start, line_start_arr, line_end_arr),
+                (np.linalg.norm(arc_start - line_end_arr), arc_start, line_end_arr, line_start_arr),
+                (np.linalg.norm(arc_end - line_start_arr), arc_end, line_start_arr, line_end_arr),
+                (np.linalg.norm(arc_end - line_end_arr), arc_end, line_end_arr, line_start_arr)
+            ]
+            _, hinge_point, line_touch_point, line_other_point = min(dists, key=lambda x: x[0])
+            
+            # Point B: Midpoint of the arc (curve peak)
+            # Use the midpoint of the arc's control points or calculate from the arc
+            arc_midpoint = (arc_start + arc_end) / 2
+            
+            # Calculate angle at hinge (Point A)
+            # Vector from hinge to curve peak
+            vec_AB = arc_midpoint - hinge_point
+            # Vector from hinge to line end
+            vec_AC = line_other_point - hinge_point
+            
+            # Calculate angle using dot product
+            norm_AB = np.linalg.norm(vec_AB)
+            norm_AC = np.linalg.norm(vec_AC)
+            
+            if norm_AB > 1e-10 and norm_AC > 1e-10:
+                cos_angle = np.clip(np.dot(vec_AB, vec_AC) / (norm_AB * norm_AC), -1.0, 1.0)
+                angle_deg = np.degrees(np.arccos(cos_angle))
+                
+                # Reject if angle > 100° (arc curves toward line, not away)
+                if angle_deg > 100:
+                    if debug:
+                        print(f"  DEBUG: Arc {arc_idx} - Rejected: arc faces wrong way (hinge angle={angle_deg:.1f}° > 100°)")
+                    continue
+
             door = classify_swing_door(
                 arc, line, arc_radius, arc_center, debug=debug, arc_idx=arc_idx)
             if door:
