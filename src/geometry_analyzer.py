@@ -64,7 +64,7 @@ class ArcReconstructor:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
         self.segment_max_threshold = page_diagonal * 0.003
         self.segment_min_threshold = page_diagonal * 0.0003
-        self.gap_tolerance = page_diagonal * 0.0015
+        self.gap_tolerance = page_diagonal * 0.00175
 
     def _is_short_segment(self, line: Dict) -> bool:
         """Check if line is short enough to be a tessellated segment (but not too small - dust)."""
@@ -175,8 +175,12 @@ class ArcReconstructor:
 
         return total_length / straight_distance
 
-    def _fit_circle(self, chain: List[Tuple[int, Dict]]) -> Optional[Dict]:
-        """Fit circle to chain of segments using geometric circle fitting."""
+    def _fit_circle(self, chain: List[Tuple[int, Dict]]) -> Tuple[Optional[Dict], Optional[str], Optional[Dict]]:
+        """Fit circle to chain of segments using geometric circle fitting.
+        Returns (arc_dict, diagnostic_string, metrics_dict) where:
+        - arc_dict is the arc on success, None on failure
+        - diagnostic_string is None on success, or contains the rejection reason on failure
+        - metrics_dict contains computed values (radius, sweep_angle, etc.) for debugging"""
         points = []
         current_point = None
 
@@ -204,7 +208,7 @@ class ArcReconstructor:
                     current_point = end
 
         if len(points) < 3:
-            return None
+            return None, f"insufficient_points({len(points)})", None
 
         points_array = np.array(points)
         p0 = points_array[0]
@@ -223,7 +227,7 @@ class ArcReconstructor:
             b = mid2 - mid1
 
             if np.linalg.det(A) == 0:
-                return None
+                return None, "collinear_points", None
 
             t_s = np.linalg.solve(A, b)
             center = mid1 + t_s[0] * perp1
@@ -234,8 +238,11 @@ class ArcReconstructor:
                 dist = np.abs(np.linalg.norm(p - center) - radius)
                 max_error = max(max_error, dist)
 
+            # Store metrics for debugging
+            metrics = {'radius': radius, 'max_error': max_error, 'error_threshold': radius * 0.8}
+
             if max_error > radius * 0.8:
-                return None
+                return None, f"max_error_too_high({max_error:.2f} > {radius * 0.8:.2f}, radius={radius:.2f}, margin={max_error - radius * 0.8:.2f})", metrics
 
             start_vec = p0 - center
             end_vec = p_end - center
@@ -255,29 +262,48 @@ class ArcReconstructor:
             sweep_angle = abs(diff)
             sweep_angle_deg = np.degrees(sweep_angle)
 
+            # Update metrics
+            metrics['sweep_angle_deg'] = sweep_angle_deg
+
             # Ensure arc is open (not closed)
             if sweep_angle_deg >= 360 or sweep_angle_deg < 15:
-                return None
+                if sweep_angle_deg < 15:
+                    margin = sweep_angle_deg - 15
+                    return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° < 15°, margin={margin:.1f}°)", metrics
+                else:
+                    return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° >= 360°)", metrics
             if sweep_angle_deg > 200:
-                return None
+                return None, f"sweep_angle_too_large({sweep_angle_deg:.1f}° > 200°, margin={sweep_angle_deg - 200:.1f}°)", metrics
 
             chord_length = np.linalg.norm(p_end - p0)
             if chord_length < 1e-5:
-                return None
+                return None, "chord_length_too_small", metrics
 
             arc_length = radius * sweep_angle
-            if arc_length <= chord_length * 1.004:
-                return None
+            metrics['chord_length'] = chord_length
+            metrics['arc_length'] = arc_length
+            metrics['arc_chord_ratio'] = arc_length / chord_length if chord_length > 0 else 0
+            
+            if arc_length <= chord_length * 1.0025:
+                return None, f"arc_too_flat(arc={arc_length:.2f}, chord={chord_length:.2f}, ratio={arc_length/chord_length:.4f}, need >1.003, margin={arc_length/chord_length - 1.003:.4f})", metrics
 
             page_diagonal = np.sqrt(self.page_width**2 + self.page_height**2)
             min_radius = page_diagonal * 0.00125
             max_radius = page_diagonal * 0.15
+            metrics['page_diagonal'] = page_diagonal
+            metrics['min_radius'] = min_radius
+            metrics['max_radius'] = max_radius
+            
             if radius < min_radius or radius > max_radius:
-                return None
+                margin = min_radius - radius if radius < min_radius else radius - max_radius
+                return None, f"radius_out_of_range({radius:.2f}, valid: {min_radius:.2f}-{max_radius:.2f}, page_diag={page_diagonal:.2f}, margin={margin:.2f})", metrics
 
             chord_radius_ratio = chord_length / radius if radius > 0 else 0
-            if chord_radius_ratio < 0.4 or chord_radius_ratio > 3.6:
-                return None
+            metrics['chord_radius_ratio'] = chord_radius_ratio
+            
+            if chord_radius_ratio < 0.25 or chord_radius_ratio > 3.6:
+                margin = 0.4 - chord_radius_ratio if chord_radius_ratio < 0.4 else chord_radius_ratio - 3.6
+                return None, f"chord_radius_ratio_out_of_range({chord_radius_ratio:.2f}, valid: 0.4-3.6, margin={margin:.2f})", metrics
 
             # Calculate tangent directions
             start_tangent = np.array(
@@ -290,7 +316,7 @@ class ArcReconstructor:
 
             sweep_rad = sweep_angle
             if sweep_rad < 1e-5:
-                return None
+                return None, "sweep_angle_too_small", metrics
 
             control_distance = radius * (4.0 / 3.0) * np.tan(sweep_rad / 4.0)
 
@@ -298,9 +324,9 @@ class ArcReconstructor:
             p2 = p_end - control_distance * end_tangent
 
             if np.linalg.norm(p1 - p0) < 1e-5 or np.linalg.norm(p2 - p_end) < 1e-5:
-                return None
+                return None, "control_point_too_close_to_endpoint", metrics
             if np.linalg.norm(p1 - p2) < 1e-5:
-                return None
+                return None, "control_points_too_close", metrics
 
             stroke_width = chain[0][1].get('stroke_width', 1.0)
 
@@ -327,12 +353,17 @@ class ArcReconstructor:
                 'center': [float(center[0]), float(center[1])],
                 'radius': float(radius),
                 'sweep_angle': float(sweep_angle_deg)
-            }
-        except Exception:
-            return None
+            }, None, metrics
+        except Exception as e:
+            return None, f"exception: {str(e)}", None
 
-    def reconstruct_arcs(self, lines: List[Dict]) -> Tuple[List[Dict], set]:
-        """Reconstruct arcs from tessellated line segments."""
+    def reconstruct_arcs(self, lines: List[Dict]) -> Tuple[List[Dict], set, List[Dict]]:
+        """Reconstruct arcs from tessellated line segments.
+        
+        Returns:
+            Tuple of (reconstructed_arcs, used_line_indices, rejected_chains)
+            where rejected_chains is a list of dicts with chain info for visualization
+        """
         start_time = time.time()
 
         segments_with_indices = []
@@ -345,7 +376,7 @@ class ArcReconstructor:
             f"DEBUG ArcReconstructor: Found {len(segments_with_indices)} candidate segments out of {len(lines)} total lines (took {segment_time - start_time:.3f}s)")
 
         if len(segments_with_indices) < 3:
-            return [], set()
+            return [], set(), []
 
         chains = self._chain_segments(segments_with_indices)
         chain_time = time.time()
@@ -353,38 +384,95 @@ class ArcReconstructor:
             f"DEBUG ArcReconstructor: Formed {len(chains)} chains from segments (took {chain_time - segment_time:.3f}s)")
 
         if not chains:
-            return [], set()
+            return [], set(), []
 
         reconstructed_arcs = []
         used_line_indices = set()
         rejected_detour = 0
         rejected_fit = 0
+        fit_rejection_details = []
+        rejected_chains = []  # For visualization
 
         for chain_idx, chain in enumerate(chains):
+            # Calculate chain bounding box for location identification
+            all_x = []
+            all_y = []
+            for orig_idx, line in chain:
+                all_x.extend([line['start'][0], line['end'][0]])
+                all_y.extend([line['start'][1], line['end'][1]])
+            chain_bbox = (min(all_x), min(all_y), max(all_x), max(all_y))
+            chain_center = ((min(all_x) + max(all_x)) / 2, (min(all_y) + max(all_y)) / 2)
+            
             detour_index = self._calculate_detour_index(chain)
-            if detour_index > 1.02:
-                arc = self._fit_circle(chain)
+            if detour_index > 1.01:
+                arc, diagnostic, metrics = self._fit_circle(chain)
                 if arc is not None:
                     reconstructed_arcs.append(arc)
                     for orig_idx, _ in chain:
                         used_line_indices.add(orig_idx)
                     print(
-                        f"DEBUG ArcReconstructor: Chain {chain_idx}: Reconstructed arc (radius={arc['radius']:.2f}, sweep={arc['sweep_angle']:.1f}°)")
+                        f"DEBUG ArcReconstructor: Chain {chain_idx}: Reconstructed arc (radius={arc['radius']:.2f}, sweep={arc['sweep_angle']:.1f}°, center=({chain_center[0]:.1f}, {chain_center[1]:.1f}))")
                 else:
                     rejected_fit += 1
+                    fit_rejection_details.append((chain_idx, detour_index, diagnostic, metrics, chain_center, chain_bbox))
+                    rejected_chains.append({
+                        'chain_idx': chain_idx,
+                        'bbox': chain_bbox,
+                        'center': chain_center,
+                        'reason': diagnostic,
+                        'detour_index': detour_index,
+                        'metrics': metrics
+                    })
+                    print(
+                        f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected fit - detour={detour_index:.4f}, reason={diagnostic}, center=({chain_center[0]:.1f}, {chain_center[1]:.1f}), bbox=({chain_bbox[0]:.1f},{chain_bbox[1]:.1f})-({chain_bbox[2]:.1f},{chain_bbox[3]:.1f})")
             else:
                 rejected_detour += 1
+                rejected_chains.append({
+                    'chain_idx': chain_idx,
+                    'bbox': chain_bbox,
+                    'center': chain_center,
+                    'reason': f'detour_too_low({detour_index:.4f} <= 1.01)',
+                    'detour_index': detour_index,
+                    'metrics': None
+                })
+                print(
+                    f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected detour - detour_index={detour_index:.4f} (need >1.01), center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
 
         fit_time = time.time()
         total_time = fit_time - start_time
 
         print(
             f"DEBUG ArcReconstructor: Rejected {rejected_detour} chains (detour), {rejected_fit} chains (fit) (fitting took {fit_time - chain_time:.3f}s)")
+        
+        if fit_rejection_details:
+            print(f"\nDEBUG ArcReconstructor: Fit rejection summary:")
+            rejection_reasons = {}
+            for chain_idx, detour, reason, metrics, center, bbox in fit_rejection_details:
+                reason_type = reason.split('(')[0] if '(' in reason else reason
+                rejection_reasons[reason_type] = rejection_reasons.get(reason_type, 0) + 1
+            for reason, count in sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True):
+                print(f"  {reason}: {count} chains")
+            
+            print(f"\nDEBUG ArcReconstructor: Detailed rejection info (first 20 chains):")
+            for chain_idx, detour, reason, metrics, center, bbox in fit_rejection_details[:20]:
+                print(f"  Chain {chain_idx}:")
+                print(f"    Location: center=({center[0]:.1f}, {center[1]:.1f}), bbox=({bbox[0]:.1f},{bbox[1]:.1f})-({bbox[2]:.1f},{bbox[3]:.1f})")
+                print(f"    Detour index: {detour:.4f}")
+                print(f"    Rejection reason: {reason}")
+                if metrics:
+                    radius_val = metrics.get('radius')
+                    sweep_val = metrics.get('sweep_angle_deg')
+                    ratio_val = metrics.get('chord_radius_ratio')
+                    radius_str = f"{radius_val:.2f}" if radius_val is not None else "N/A"
+                    sweep_str = f"{sweep_val:.1f}°" if sweep_val is not None else "N/A"
+                    ratio_str = f"{ratio_val:.2f}" if ratio_val is not None else "N/A"
+                    print(f"    Metrics: radius={radius_str}, sweep_angle={sweep_str}, chord_radius_ratio={ratio_str}")
+        
         print(
-            f"DEBUG ArcReconstructor: Final result: {len(reconstructed_arcs)} reconstructed arcs from {len(used_line_indices)} line segments")
+            f"\nDEBUG ArcReconstructor: Final result: {len(reconstructed_arcs)} reconstructed arcs from {len(used_line_indices)} line segments")
         print(
             f"DEBUG ArcReconstructor: Total time taken: {total_time:.3f} seconds")
-        return reconstructed_arcs, used_line_indices
+        return reconstructed_arcs, used_line_indices, rejected_chains
 
 
 def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: float, page_height: float) -> Tuple[List[Dict], List[Dict]]:
@@ -428,7 +516,7 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
             p0 = np.array(control_points[0])
             p3 = np.array(control_points[3])
             chord_length = np.linalg.norm(p3 - p0)
-            if MIN_LENGTH <= chord_length <= MAX_LENGTH:
+            if MIN_LENGTH  <= chord_length <= MAX_LENGTH:
                 filtered_arcs_for_percentile.append(arc)
 
     # Hardcoded percentiles for door filtering
@@ -448,8 +536,8 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
 
     # Calculate arc thresholds based on ARC stroke widths only, not combined
     if arc_strokes:
-        arc_min_threshold = np.percentile(arc_strokes, 40)
-        arc_max_threshold = np.percentile(arc_strokes, 80)
+        arc_min_threshold = np.percentile(arc_strokes, 20)
+        arc_max_threshold = np.percentile(arc_strokes, 100)
         print(
             f"DEBUG filter_door_candidates: Arc stroke width range: min={min(arc_strokes):.3f}, max={max(arc_strokes):.3f}, 40th={arc_min_threshold:.3f}, 80th={arc_max_threshold:.3f}")
     else:
@@ -499,7 +587,7 @@ def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dic
 
     # Step 1: Reconstruct arcs from tessellated line segments
     reconstructor = ArcReconstructor(page_width, page_height)
-    reconstructed_arcs, used_line_indices = reconstructor.reconstruct_arcs(
+    reconstructed_arcs, used_line_indices, rejected_chains = reconstructor.reconstruct_arcs(
         all_lines)
 
     if reconstructed_arcs:
@@ -524,5 +612,6 @@ def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dic
         "filtered_lines": filtered_lines,
         "filtered_arcs": filtered_arcs,
         "door_candidate_arcs": filtered_arcs,  # Use filtered arcs directly
-        "dashed_lines": dashed_lines
+        "dashed_lines": dashed_lines,
+        "rejected_chains": rejected_chains  # For visualization
     }

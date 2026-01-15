@@ -1,0 +1,148 @@
+"""Visualize rejected chains with boxes and detailed information."""
+import sys
+from pathlib import Path
+import pymupdf
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.vector_extractor import extract_vectors
+from src.geometry_analyzer import analyze_geometry
+
+# Path relative to project root
+pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
+    "FirstSource_R25-01360-A-V03.pdf_-_Page_2.pdf"
+
+print("Extracting vectors...")
+result = extract_vectors(str(pdf_path))
+
+print(f"Extracted: {len(result['lines'])} lines, {len(result['arcs'])} arcs, {len(result['dashed_lines'])} dashed lines")
+
+# Analyze geometry to get rejected chains
+print("\nAnalyzing geometry...")
+analysis = analyze_geometry(
+    result['lines'],
+    result['arcs'],
+    result['dashed_lines'],
+    result['page_width'],
+    result['page_height']
+)
+
+rejected_chains = analysis.get('rejected_chains', [])
+
+if not rejected_chains:
+    print("\nNo rejected chains to visualize.")
+    sys.exit(0)
+
+print(f"\nFound {len(rejected_chains)} rejected chains")
+
+# Open the original PDF
+doc = pymupdf.open(pdf_path)
+page = doc[0]
+page_height = page.rect.height
+
+# Draw boxes around each rejected chain with detailed labels
+print("\nDrawing rejected chain boxes...")
+for chain_info in rejected_chains:
+    bbox = chain_info['bbox']  # (min_x, min_y, max_x, max_y)
+    center = chain_info['center']  # (x, y)
+    chain_idx = chain_info['chain_idx']
+    reason = chain_info.get('reason', 'unknown')
+    detour_index = chain_info.get('detour_index', 0)
+    metrics = chain_info.get('metrics', {})
+    
+    # Create a shape for the box
+    shape = page.new_shape()
+    
+    # Draw rectangle (bbox format: x0, y0, x1, y1)
+    rect = pymupdf.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+    shape.draw_rect(rect)
+    
+    # Draw in red with 2pt width
+    shape.finish(color=(1, 0, 0), width=2.0)
+    shape.commit()
+    
+    # Determine label position (above or below box)
+    if bbox[3] + 50 < page_height:
+        # Label above the box
+        label_y = bbox[3] + 8
+        line_spacing = 10
+    else:
+        # Label below the box
+        label_y = bbox[1] - 5
+        line_spacing = -10
+    
+    label_x = bbox[0]  # Left edge of box
+    
+    # Create detailed text labels
+    # Line 1: Chain index and coordinates
+    coord_text = f"#{chain_idx}: ({center[0]:.1f}, {center[1]:.1f})"
+    page.insert_text(
+        pymupdf.Point(label_x, label_y),
+        coord_text,
+        fontsize=9,
+        color=(1, 0, 0),  # Red text
+        render_mode=0
+    )
+    
+    # Line 2: Detour index
+    if detour_index > 0:
+        detour_text = f"detour={detour_index:.4f}"
+        page.insert_text(
+            pymupdf.Point(label_x, label_y + line_spacing),
+            detour_text,
+            fontsize=7,
+            color=(0.8, 0, 0),
+            render_mode=0
+        )
+    
+    # Line 3: Rejection reason (shortened)
+    reason_short = reason.split('(')[0] if '(' in reason else reason[:30]
+    if len(reason_short) > 0:
+        page.insert_text(
+            pymupdf.Point(label_x, label_y + line_spacing * 2),
+            reason_short[:30],
+            fontsize=6,
+            color=(0.7, 0, 0),
+            render_mode=0
+        )
+    
+    # Line 4: Metrics if available
+    if metrics:
+        metrics_parts = []
+        if metrics.get('radius') is not None:
+            metrics_parts.append(f"r={metrics['radius']:.1f}")
+        if metrics.get('sweep_angle_deg') is not None:
+            metrics_parts.append(f"θ={metrics['sweep_angle_deg']:.1f}°")
+        if metrics.get('chord_radius_ratio') is not None:
+            metrics_parts.append(f"c/r={metrics['chord_radius_ratio']:.2f}")
+        
+        if metrics_parts:
+            metrics_text = ", ".join(metrics_parts[:3])  # Limit to 3 metrics
+            page.insert_text(
+                pymupdf.Point(label_x, label_y + line_spacing * 3),
+                metrics_text[:35],
+                fontsize=5,
+                color=(0.6, 0, 0),
+                render_mode=0
+            )
+
+# Save output
+output_dir = Path(__file__).parent.parent / "Data" / "Output_drawings"
+output_dir.mkdir(exist_ok=True)
+
+output_path = output_dir / f"{pdf_path.stem}_rejected_chains.pdf"
+doc.save(str(output_path))
+doc.close()
+
+print(f"\nRejected chains visualization saved to: {output_path}")
+print(f"Total rejected chains: {len(rejected_chains)}")
+
+# Print summary
+print("\n=== REJECTION SUMMARY ===")
+rejection_reasons = {}
+for chain_info in rejected_chains:
+    reason_type = chain_info['reason'].split('(')[0] if '(' in chain_info['reason'] else chain_info['reason']
+    rejection_reasons[reason_type] = rejection_reasons.get(reason_type, 0) + 1
+
+for reason, count in sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True):
+    print(f"  {reason}: {count} chains")
