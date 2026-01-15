@@ -177,7 +177,7 @@ class ArcReconstructor:
 
         # Allow angles up to 40 degrees (smooth continuation for arcs)
         # Reject sharp turns (>40 degrees) which indicate intersecting lines
-        return angle_deg <= 30.0
+        return angle_deg <= 40.0
 
     def _chain_segments(self, segments: List[Tuple[int, Dict]]) -> List[List[Tuple[int, Dict]]]:
         """Group connected segments into chains, avoiding intersecting lines."""
@@ -504,7 +504,7 @@ class ArcReconstructor:
                             (min(all_y) + max(all_y)) / 2)
 
             detour_index = self._calculate_detour_index(chain)
-            if detour_index > 1.02:  # Stricter: increased from 1.01
+            if detour_index > 1.01:  # Stricter: increased from 1.01
                 arc, diagnostic, metrics = self._fit_circle(chain)
                 if arc is not None:
                     reconstructed_arcs.append(arc)

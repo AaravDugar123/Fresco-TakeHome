@@ -55,7 +55,7 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold = arc_radius * .03
+    threshold = arc_radius * .03  # LOOK HERE
     # has to be greater than .05
 
     distances = [
@@ -72,7 +72,7 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
     # Step 4: Angle Check (calculate first, needed for ratio scaling)
     sweep_angle = calculate_arc_sweep_angle(arc, arc_radius)
     # greater than 7.5 less than 120
-    if sweep_angle is None or not (12.5 <= sweep_angle <= 120):
+    if sweep_angle is None or not (12.5 <= sweep_angle <= 120):  # LOOK HERE
         if debug:
             coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
             print(f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 12.5-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: None")
@@ -91,9 +91,9 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
 
     # Scale bounds around expected ratio based on sweep angle
     # Wider tolerance for smaller angles (more variation in door designs)
-    if sweep_angle >= 60:
+    if sweep_angle >= 60:  # LOOK HERE
         # Larger angles: tighter bounds (0.6x to 1.3x expected)
-        min_ratio = expected_ratio * 0.7
+        min_ratio = expected_ratio * 0.5
         max_ratio = expected_ratio * 1.3
     elif sweep_angle >= 30:
         # Medium angles: moderate bounds (0.5x to 1.5x expected)
@@ -106,7 +106,8 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
 
     if not (min_ratio < ratio < max_ratio):
         if debug:
-            print(f"  DEBUG: Arc {arc_idx} - Rule 2 failed - Ratio: {ratio:.2f} (line_length={line_length:.2f}, arc_radius={arc_radius:.2f}, sweep={sweep_angle:.1f}°, expected={expected_ratio:.2f}, allowed: {min_ratio:.2f}-{max_ratio:.2f})")
+            coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
+            print(f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 2 failed - Ratio: {ratio:.2f} (line_length={line_length:.2f}, arc_radius={arc_radius:.2f}, sweep={sweep_angle:.1f}°, expected={expected_ratio:.2f}, allowed: {min_ratio:.2f}-{max_ratio:.2f})")
         return None
 
     return {
@@ -146,7 +147,8 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
         arc_radius, arc_center = result
 
         if debug:
-            print(f"\nDEBUG: Testing arc {arc_idx}")
+            coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
+            print(f"\nDEBUG: Testing arc {arc_idx} {coord_str}")
             sweep = calculate_arc_sweep_angle(arc, arc_radius)
             print(
                 f"  Arc radius: {arc_radius:.2f}, sweep: {sweep:.1f}°" if sweep else f"  Arc radius: {arc_radius:.2f}, sweep: None")
