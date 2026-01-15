@@ -64,7 +64,7 @@ class ArcReconstructor:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
         self.segment_max_threshold = page_diagonal * 0.003
         self.segment_min_threshold = page_diagonal * 0.0003
-        self.gap_tolerance = page_diagonal * 0.001
+        self.gap_tolerance = page_diagonal * 0.0015
 
     def _is_short_segment(self, line: Dict) -> bool:
         """Check if line is short enough to be a tessellated segment (but not too small - dust)."""
@@ -234,7 +234,7 @@ class ArcReconstructor:
                 dist = np.abs(np.linalg.norm(p - center) - radius)
                 max_error = max(max_error, dist)
 
-            if max_error > radius * 0.6:
+            if max_error > radius * 0.8:
                 return None
 
             start_vec = p0 - center
@@ -266,17 +266,17 @@ class ArcReconstructor:
                 return None
 
             arc_length = radius * sweep_angle
-            if arc_length <= chord_length * 1.005:
+            if arc_length <= chord_length * 1.004:
                 return None
 
             page_diagonal = np.sqrt(self.page_width**2 + self.page_height**2)
-            min_radius = page_diagonal * 0.0015
-            max_radius = page_diagonal * 0.1
+            min_radius = page_diagonal * 0.00125
+            max_radius = page_diagonal * 0.15
             if radius < min_radius or radius > max_radius:
                 return None
 
             chord_radius_ratio = chord_length / radius if radius > 0 else 0
-            if chord_radius_ratio < 0.25 or chord_radius_ratio > 3.0:
+            if chord_radius_ratio < 0.4 or chord_radius_ratio > 3.6:
                 return None
 
             # Calculate tangent directions

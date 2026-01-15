@@ -78,7 +78,7 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
 
     # Step 4: Angle Check
     sweep_angle = calculate_arc_sweep_angle(arc, arc_radius)
-    if sweep_angle is None or not (70 <= sweep_angle <= 120):
+    if sweep_angle is None or not (20 <= sweep_angle <= 150):
         if debug:
             print(f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 70-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: None")
         return None
