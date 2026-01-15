@@ -55,8 +55,8 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold = arc_radius * .1
-    # has to be greater than .01
+    threshold = arc_radius * .03
+    # has to be greater than .05
 
     distances = [
         np.linalg.norm(arc_start - line_start),
@@ -72,10 +72,10 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
     # Step 4: Angle Check (calculate first, needed for ratio scaling)
     sweep_angle = calculate_arc_sweep_angle(arc, arc_radius)
     # greater than 7.5 less than 120
-    if sweep_angle is None or not (7.5 <= sweep_angle <= 120):
+    if sweep_angle is None or not (12.5 <= sweep_angle <= 120):
         if debug:
             coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
-            print(f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 7.5-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: None")
+            print(f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 12.5-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: None")
         return None
 
     # Step 2: Ratio Check (Length vs Radius) - scaled by sweep angle
@@ -93,16 +93,16 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
     # Wider tolerance for smaller angles (more variation in door designs)
     if sweep_angle >= 60:
         # Larger angles: tighter bounds (0.6x to 1.3x expected)
-        min_ratio = expected_ratio * 0.6
+        min_ratio = expected_ratio * 0.7
         max_ratio = expected_ratio * 1.3
     elif sweep_angle >= 30:
         # Medium angles: moderate bounds (0.5x to 1.5x expected)
-        min_ratio = expected_ratio * 0.55
-        max_ratio = expected_ratio * 1.45
+        min_ratio = expected_ratio * 0.6
+        max_ratio = expected_ratio * 1.4
     else:
         # Small angles: wider bounds (0.4x to 2.0x expected)
-        min_ratio = expected_ratio * 0.45
-        max_ratio = expected_ratio * 1.55
+        min_ratio = expected_ratio * 0.5
+        max_ratio = expected_ratio * 1.5
 
     if not (min_ratio < ratio < max_ratio):
         if debug:

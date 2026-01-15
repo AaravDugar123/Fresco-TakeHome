@@ -64,7 +64,7 @@ class ArcReconstructor:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
         self.segment_max_threshold = page_diagonal * 0.003
         self.segment_min_threshold = page_diagonal * 0.00035
-        self.gap_tolerance = page_diagonal * 0.00175
+        self.gap_tolerance = page_diagonal * 0.0016
 
     def _is_short_segment(self, line: Dict) -> bool:
         """Check if line is short enough to be a tessellated segment (but not too small - dust)."""
@@ -104,8 +104,83 @@ class ArcReconstructor:
         dy = start1[1] - end2[1]
         return dx*dx + dy*dy <= threshold_sq
 
+    def _continues_smoothly(self, chain: List[Tuple[int, Dict]], new_segment: Dict, add_to_end: bool) -> bool:
+        """
+        Check if a new segment continues the chain direction smoothly (not an intersecting line).
+
+        Args:
+            chain: Current chain of segments
+            new_segment: Segment to potentially add
+            add_to_end: True if adding to end of chain, False if adding to start
+
+        Returns:
+            True if the segment continues smoothly (angle <= 40 degrees), False otherwise
+        """
+        if len(chain) == 0:
+            return True  # First segment always allowed
+
+        if add_to_end:
+            # Get the direction of the chain at the end (outward from connection point)
+            last_seg = chain[-1][1]
+            last_start = np.array(last_seg['start'])
+            last_end = np.array(last_seg['end'])
+            # Chain direction is from start to end of last segment (outward from connection)
+            chain_dir = last_end - last_start
+
+            # Find which endpoint of new_segment connects to last_end
+            new_start = np.array(new_segment['start'])
+            new_end = np.array(new_segment['end'])
+            dist_to_start = np.linalg.norm(last_end - new_start)
+            dist_to_end = np.linalg.norm(last_end - new_end)
+
+            if dist_to_start <= dist_to_end:
+                # new_segment connects at its start, so direction is start->end (continuing forward)
+                new_dir = new_end - new_start
+            else:
+                # new_segment connects at its end, so direction is end->start (reversed)
+                new_dir = new_start - new_end
+        else:
+            # Get the direction of the chain at the start (outward from connection point)
+            first_seg = chain[0][1]
+            first_start = np.array(first_seg['start'])
+            first_end = np.array(first_seg['end'])
+            # Chain direction is from start to end of first segment (outward from connection)
+            chain_dir = first_end - first_start
+
+            # Find which endpoint of new_segment connects to first_start
+            new_start = np.array(new_segment['start'])
+            new_end = np.array(new_segment['end'])
+            dist_to_start = np.linalg.norm(first_start - new_start)
+            dist_to_end = np.linalg.norm(first_start - new_end)
+
+            if dist_to_start <= dist_to_end:
+                # new_segment connects at its start, so direction outward is start->end
+                new_dir = new_end - new_start
+            else:
+                # new_segment connects at its end, so direction outward is end->start (reversed)
+                new_dir = new_start - new_end
+
+        # Normalize direction vectors
+        chain_norm = np.linalg.norm(chain_dir)
+        new_norm = np.linalg.norm(new_dir)
+
+        if chain_norm < 1e-5 or new_norm < 1e-5:
+            return True  # Degenerate case, allow it
+
+        chain_dir_unit = chain_dir / chain_norm
+        new_dir_unit = new_dir / new_norm
+
+        # Calculate angle between directions using dot product
+        dot_product = np.clip(np.dot(chain_dir_unit, new_dir_unit), -1.0, 1.0)
+        angle_rad = np.arccos(dot_product)
+        angle_deg = np.degrees(angle_rad)
+
+        # Allow angles up to 40 degrees (smooth continuation for arcs)
+        # Reject sharp turns (>40 degrees) which indicate intersecting lines
+        return angle_deg <= 30.0
+
     def _chain_segments(self, segments: List[Tuple[int, Dict]]) -> List[List[Tuple[int, Dict]]]:
-        """Group connected segments into chains."""
+        """Group connected segments into chains, avoiding intersecting lines."""
         if not segments:
             return []
 
@@ -131,16 +206,19 @@ class ArcReconstructor:
                     connects_to_start = self._are_connected(
                         chain[0][1], other_seg)
 
+                    # Check if segment continues smoothly before adding
                     if connects_to_end:
-                        chain.append((other_orig_idx, other_seg))
-                        used.add(j)
-                        changed = True
-                        break
+                        if self._continues_smoothly(chain, other_seg, add_to_end=True):
+                            chain.append((other_orig_idx, other_seg))
+                            used.add(j)
+                            changed = True
+                            break
                     elif connects_to_start:
-                        chain.insert(0, (other_orig_idx, other_seg))
-                        used.add(j)
-                        changed = True
-                        break
+                        if self._continues_smoothly(chain, other_seg, add_to_end=False):
+                            chain.insert(0, (other_orig_idx, other_seg))
+                            used.add(j)
+                            changed = True
+                            break
 
             if len(chain) >= 3:
                 chains.append(chain)
@@ -259,10 +337,10 @@ class ArcReconstructor:
 
             # Store metrics for debugging
             metrics = {'radius': radius, 'max_error': max_error,
-                       'error_threshold': radius * .8}
+                       'error_threshold': radius * .6}
 
-            if max_error > radius * .8:
-                return None, f"max_error_too_high({max_error:.2f} > {radius * .8:.2f}, radius={radius:.2f}, margin={max_error - radius * 0.8:.2f})", metrics
+            if max_error > radius * .6:
+                return None, f"max_error_too_high({max_error:.2f} > {radius * .6:.2f}, radius={radius:.2f}, margin={max_error - radius * 0.6:.2f})", metrics
 
             start_vec = p0 - center
             end_vec = p_end - center
@@ -285,10 +363,10 @@ class ArcReconstructor:
             # Update metrics
             metrics['sweep_angle_deg'] = sweep_angle_deg
 
-            # Ensure arc is open (not closed)
-            if sweep_angle_deg >= 360 or sweep_angle_deg < 10:
-                if sweep_angle_deg < 10:
-                    margin = sweep_angle_deg - 10
+            # Ensure arc is open (not closed) - stricter range
+            if sweep_angle_deg >= 360 or sweep_angle_deg < 12:
+                if sweep_angle_deg < 12:
+                    margin = sweep_angle_deg - 12
                     return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° < 12°, margin={margin:.1f}°)", metrics
                 else:
                     return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° >= 360°)", metrics
@@ -305,12 +383,12 @@ class ArcReconstructor:
             metrics['arc_chord_ratio'] = arc_length / \
                 chord_length if chord_length > 0 else 0
 
-            if arc_length <= chord_length * 1.0025:
-                return None, f"arc_too_flat(arc={arc_length:.2f}, chord={chord_length:.2f}, ratio={arc_length/chord_length:.4f}, need >1.003, margin={arc_length/chord_length - 1.003:.4f})", metrics
+            if arc_length <= chord_length * 1.01:
+                return None, f"arc_too_flat(arc={arc_length:.2f}, chord={chord_length:.2f}, ratio={arc_length/chord_length:.4f}, need >1.005, margin={arc_length/chord_length - 1.005:.4f})", metrics
 
             page_diagonal = np.sqrt(self.page_width**2 + self.page_height**2)
-            min_radius = page_diagonal * 0.00125
-            max_radius = page_diagonal * 0.15
+            min_radius = page_diagonal * 0.0015  # Stricter: increased from 0.00125
+            max_radius = page_diagonal * 0.1  # Stricter: reduced from 0.15
             metrics['page_diagonal'] = page_diagonal
             metrics['min_radius'] = min_radius
             metrics['max_radius'] = max_radius
@@ -322,9 +400,9 @@ class ArcReconstructor:
             chord_radius_ratio = chord_length / radius if radius > 0 else 0
             metrics['chord_radius_ratio'] = chord_radius_ratio
 
-            if chord_radius_ratio < 0.25 or chord_radius_ratio > 3.6:
-                margin = 0.4 - chord_radius_ratio if chord_radius_ratio < 0.4 else chord_radius_ratio - 3.6
-                return None, f"chord_radius_ratio_out_of_range({chord_radius_ratio:.2f}, valid: 0.4-3.6, margin={margin:.2f})", metrics
+            if chord_radius_ratio < 0.3 or chord_radius_ratio > 3.2:
+                margin = 0.3 - chord_radius_ratio if chord_radius_ratio < 0.3 else chord_radius_ratio - 3.2
+                return None, f"chord_radius_ratio_out_of_range({chord_radius_ratio:.2f}, valid: 0.3-3.2, margin={margin:.2f})", metrics
 
             # Calculate tangent directions
             start_tangent = np.array(
@@ -426,7 +504,7 @@ class ArcReconstructor:
                             (min(all_y) + max(all_y)) / 2)
 
             detour_index = self._calculate_detour_index(chain)
-            if detour_index > 1.01:
+            if detour_index > 1.02:  # Stricter: increased from 1.01
                 arc, diagnostic, metrics = self._fit_circle(chain)
                 if arc is not None:
                     reconstructed_arcs.append(arc)
@@ -484,12 +562,12 @@ class ArcReconstructor:
                     'chain_idx': chain_idx,
                     'bbox': chain_bbox,
                     'center': chain_center,
-                    'reason': f'detour_too_low({detour_index:.4f} <= 1.01)',
+                    'reason': f'detour_too_low({detour_index:.4f} <= 1.015)',
                     'detour_index': detour_index,
                     'metrics': None
                 })
                 print(
-                    f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected detour - detour_index={detour_index:.4f} (need >1.01), center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
+                    f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected detour - detour_index={detour_index:.4f} (need >1.015), center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
 
                 # TEMPORARY: Log detailed info for chains near target area (894.4, 1587)
                 target_x, target_y = 894.4, 1587.0
@@ -500,7 +578,7 @@ class ArcReconstructor:
                     print(
                         f"  Chain {chain_idx}: center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
                     print(
-                        f"  Rejection reason: detour_too_low (detour_index={detour_index:.4f} <= 1.01)")
+                        f"  Rejection reason: detour_too_low (detour_index={detour_index:.4f} <= 1.015)")
                     print(f"  Detour index: {detour_index:.4f}")
                     print(
                         f"  Bbox: ({chain_bbox[0]:.1f}, {chain_bbox[1]:.1f}) to ({chain_bbox[2]:.1f}, {chain_bbox[3]:.1f})")
