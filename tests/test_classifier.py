@@ -1,5 +1,6 @@
 """Test to find swing doors and draw red rectangles around them."""
 import sys
+import time
 from pathlib import Path
 import pymupdf
 
@@ -12,6 +13,9 @@ from src.door_classifier import classify_swing_doors
 # Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
     "FirstSource_R25-01360-A-V03.pdf_-_Page_2.pdf"
+
+# Start timing
+start_time = time.time()
 
 # Extract vectors
 print("Extracting vectors...")
@@ -105,3 +109,7 @@ doc.save(str(output_path))
 doc.close()
 
 print(f"\nOutput saved to: {output_path}")
+
+# Calculate and print time as the last thing
+total_time = time.time() - start_time
+print(f"Total processing time: {total_time:.2f} seconds")

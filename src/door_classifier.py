@@ -55,7 +55,8 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold = arc_radius * .25
+    threshold = arc_radius * .01
+    #has to be greater than .01 
 
     distances = [
         np.linalg.norm(arc_start - line_start),
@@ -68,19 +69,40 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
 
 
 def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np.ndarray, debug: bool = False, arc_idx: int = -1) -> Optional[Dict]:
-    # Step 2: Ratio Check (Length vs Radius) - Touch check already done in classify_swing_doors
-    line_length = np.linalg.norm(np.array(line['end']) - np.array(line['start']))
-    ratio = line_length / arc_radius
-    if not (0.6 < ratio < 1.4):
+    # Step 4: Angle Check (calculate first, needed for ratio scaling)
+    sweep_angle = calculate_arc_sweep_angle(arc, arc_radius)
+    if sweep_angle is None or not (7.5 <= sweep_angle <= 120):  # greater than 7.5 less than 120
         if debug:
-            print(f"  DEBUG: Arc {arc_idx} - Rule 2 failed - Ratio: {ratio:.2f} (line_length={line_length:.2f}, arc_radius={arc_radius:.2f}, required: 0.6-1.4)")
+            print(f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 7.5-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: None")
         return None
 
-    # Step 4: Angle Check
-    sweep_angle = calculate_arc_sweep_angle(arc, arc_radius)
-    if sweep_angle is None or not (20 <= sweep_angle <= 150):
+    # Step 2: Ratio Check (Length vs Radius) - scaled by sweep angle
+    # For a circular arc: chord/radius = 2 * sin(sweep_angle / 2)
+    # The door line length should be similar to the chord length
+    line_length = np.linalg.norm(np.array(line['end']) - np.array(line['start']))
+    ratio = line_length / arc_radius
+    
+    # Calculate expected ratio for this sweep angle
+    expected_ratio = 2 * np.sin(np.radians(sweep_angle / 2))
+    
+    # Scale bounds around expected ratio based on sweep angle
+    # Wider tolerance for smaller angles (more variation in door designs)
+    if sweep_angle >= 60:
+        # Larger angles: tighter bounds (0.6x to 1.3x expected)
+        min_ratio = expected_ratio * 0.6
+        max_ratio = expected_ratio * 1.3
+    elif sweep_angle >= 30:
+        # Medium angles: moderate bounds (0.5x to 1.5x expected)
+        min_ratio = expected_ratio * 0.55
+        max_ratio = expected_ratio * 1.45
+    else:
+        # Small angles: wider bounds (0.4x to 2.0x expected)
+        min_ratio = expected_ratio * 0.45
+        max_ratio = expected_ratio * 1.55
+    
+    if not (min_ratio < ratio < max_ratio):
         if debug:
-            print(f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 70-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: None")
+            print(f"  DEBUG: Arc {arc_idx} - Rule 2 failed - Ratio: {ratio:.2f} (line_length={line_length:.2f}, arc_radius={arc_radius:.2f}, sweep={sweep_angle:.1f}°, expected={expected_ratio:.2f}, allowed: {min_ratio:.2f}-{max_ratio:.2f})")
         return None
 
     return {

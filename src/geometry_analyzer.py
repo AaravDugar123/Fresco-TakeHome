@@ -63,7 +63,7 @@ class ArcReconstructor:
         self.page_height = page_height
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
         self.segment_max_threshold = page_diagonal * 0.003
-        self.segment_min_threshold = page_diagonal * 0.0003
+        self.segment_min_threshold = page_diagonal * 0.00035
         self.gap_tolerance = page_diagonal * 0.00175
 
     def _is_short_segment(self, line: Dict) -> bool:
