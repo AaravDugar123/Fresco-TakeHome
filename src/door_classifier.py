@@ -55,7 +55,7 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold = arc_radius * .01
+    threshold = arc_radius * .1
     # has to be greater than .01
 
     distances = [
@@ -74,7 +74,8 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
     # greater than 7.5 less than 120
     if sweep_angle is None or not (7.5 <= sweep_angle <= 120):
         if debug:
-            print(f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 7.5-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} - Rule 1 failed - Sweep angle: None")
+            coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
+            print(f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 7.5-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: None")
         return None
 
     # Step 2: Ratio Check (Length vs Radius) - scaled by sweep angle
@@ -231,46 +232,55 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             arc_end = np.array(arc['control_points'][-1])
             line_start_arr = np.array(line['start'])
             line_end_arr = np.array(line['end'])
-            
+
             # Find which arc endpoint touches the line (Point A - Hinge)
             dists = [
-                (np.linalg.norm(arc_start - line_start_arr), arc_start, line_start_arr, line_end_arr),
-                (np.linalg.norm(arc_start - line_end_arr), arc_start, line_end_arr, line_start_arr),
-                (np.linalg.norm(arc_end - line_start_arr), arc_end, line_start_arr, line_end_arr),
-                (np.linalg.norm(arc_end - line_end_arr), arc_end, line_end_arr, line_start_arr)
+                (np.linalg.norm(arc_start - line_start_arr),
+                 arc_start, line_start_arr, line_end_arr),
+                (np.linalg.norm(arc_start - line_end_arr),
+                 arc_start, line_end_arr, line_start_arr),
+                (np.linalg.norm(arc_end - line_start_arr),
+                 arc_end, line_start_arr, line_end_arr),
+                (np.linalg.norm(arc_end - line_end_arr),
+                 arc_end, line_end_arr, line_start_arr)
             ]
-            _, hinge_point, line_touch_point, line_other_point = min(dists, key=lambda x: x[0])
-            
+            _, hinge_point, line_touch_point, line_other_point = min(
+                dists, key=lambda x: x[0])
+
             # Point B: Midpoint of the arc (curve peak)
             # Use the midpoint of the arc's control points or calculate from the arc
             arc_midpoint = (arc_start + arc_end) / 2
-            
+
             # Calculate angle at hinge (Point A)
             # Vector from hinge to curve peak
             vec_AB = arc_midpoint - hinge_point
             # Vector from hinge to line end
             vec_AC = line_other_point - hinge_point
-            
+
             # Calculate angle using dot product
             norm_AB = np.linalg.norm(vec_AB)
             norm_AC = np.linalg.norm(vec_AC)
-            
+
             if norm_AB > 1e-10 and norm_AC > 1e-10:
-                cos_angle = np.clip(np.dot(vec_AB, vec_AC) / (norm_AB * norm_AC), -1.0, 1.0)
+                cos_angle = np.clip(np.dot(vec_AB, vec_AC) /
+                                    (norm_AB * norm_AC), -1.0, 1.0)
                 angle_deg = np.degrees(np.arccos(cos_angle))
-                
+
                 # Reject if angle > 100° (arc curves toward line, not away)
                 if angle_deg > 100:
                     if debug:
-                        print(f"  DEBUG: Arc {arc_idx} - Rejected: arc faces wrong way (hinge angle={angle_deg:.1f}° > 100°)")
+                        coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
+                        print(
+                            f"  DEBUG: Arc {arc_idx} {coord_str} - Rejected: arc faces wrong way (hinge angle={angle_deg:.1f}° > 100°)")
                     continue
 
             door = classify_swing_door(
                 arc, line, arc_radius, arc_center, debug=debug, arc_idx=arc_idx)
             if door:
                 if debug:
+                    coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
                     print(
-                        f"  DEBUG: Arc {arc_idx} matched with line {i} - All rules passed!")
+                        f"  DEBUG: Arc {arc_idx} {coord_str} matched with line {i} - All rules passed!")
                 swing_doors.append(door)
                 used_lines.add(i)
                 used_arcs.add(arc_idx)
@@ -280,14 +290,16 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             print(
                 f"  Checked {lines_checked} lines, {lines_passed_bbox} passed bbox, {lines_passed_touch} passed touch")
             if lines_passed_touch == 0:
+                coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
+                arc_bbox_str = f"bbox=({arc_bbox[0]:.1f}, {arc_bbox[1]:.1f}, {arc_bbox[2]:.1f}, {arc_bbox[3]:.1f})"
                 print(
-                    f"  DEBUG: Arc {arc_idx} - No lines passed touch check (all failed before Rule 1/2)")
+                    f"  DEBUG: Arc {arc_idx} {coord_str} {arc_bbox_str} - No lines passed touch check (all failed before Rule 1/2)")
                 if closest_bbox_distance < float('inf'):
                     print(
                         f"  Closest bbox distance: {closest_bbox_distance:.2f} (threshold: overlap required)")
                 if closest_touch_distance < float('inf'):
                     print(
-                        f"  Closest touch distance: {closest_touch_distance:.2f} (threshold: {arc_radius * 0.8:.2f})")
+                        f"  Closest touch distance: {closest_touch_distance:.2f} (threshold: {arc_radius * 0.01:.2f})")
                 elif lines_passed_bbox == 0:
                     print(
                         f"  Closest bbox distance: {closest_bbox_distance:.2f} (no lines passed bbox check)")

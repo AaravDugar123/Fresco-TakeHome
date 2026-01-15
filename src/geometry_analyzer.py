@@ -286,17 +286,17 @@ class ArcReconstructor:
             metrics['sweep_angle_deg'] = sweep_angle_deg
 
             # Ensure arc is open (not closed)
-            if sweep_angle_deg >= 360 or sweep_angle_deg < 15:
-                if sweep_angle_deg < 15:
-                    margin = sweep_angle_deg - 15
-                    return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° < 15°, margin={margin:.1f}°)", metrics
+            if sweep_angle_deg >= 360 or sweep_angle_deg < 12:
+                if sweep_angle_deg < 12:
+                    margin = sweep_angle_deg - 12
+                    return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° < 12°, margin={margin:.1f}°)", metrics
                 else:
                     return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° >= 360°)", metrics
-            if sweep_angle_deg > 200:
-                return None, f"sweep_angle_too_large({sweep_angle_deg:.1f}° > 200°, margin={sweep_angle_deg - 200:.1f}°)", metrics
+            if sweep_angle_deg > 120:
+                return None, f"sweep_angle_too_large({sweep_angle_deg:.1f}° > 120°, margin={sweep_angle_deg - 200:.1f}°)", metrics
 
             chord_length = np.linalg.norm(p_end - p0)
-            if chord_length < 1e-5:
+            if chord_length < 1e-1:
                 return None, "chord_length_too_small", metrics
 
             arc_length = radius * sweep_angle
