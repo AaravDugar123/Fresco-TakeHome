@@ -11,7 +11,7 @@ from src.door_classifier import classify_swing_doors
 
 # Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
-    "test.pdf"
+    "FirstSource_R25-01360-A-V03.pdf_-_Page_2.pdf"
 
 # Extract vectors
 print("Extracting vectors...")
