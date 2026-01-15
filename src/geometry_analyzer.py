@@ -259,10 +259,10 @@ class ArcReconstructor:
 
             # Store metrics for debugging
             metrics = {'radius': radius, 'max_error': max_error,
-                       'error_threshold': radius * 0.8}
+                       'error_threshold': radius * .8}
 
-            if max_error > radius * 0.8:
-                return None, f"max_error_too_high({max_error:.2f} > {radius * 0.8:.2f}, radius={radius:.2f}, margin={max_error - radius * 0.8:.2f})", metrics
+            if max_error > radius * .8:
+                return None, f"max_error_too_high({max_error:.2f} > {radius * .8:.2f}, radius={radius:.2f}, margin={max_error - radius * 0.8:.2f})", metrics
 
             start_vec = p0 - center
             end_vec = p_end - center
@@ -286,9 +286,9 @@ class ArcReconstructor:
             metrics['sweep_angle_deg'] = sweep_angle_deg
 
             # Ensure arc is open (not closed)
-            if sweep_angle_deg >= 360 or sweep_angle_deg < 12:
-                if sweep_angle_deg < 12:
-                    margin = sweep_angle_deg - 12
+            if sweep_angle_deg >= 360 or sweep_angle_deg < 10:
+                if sweep_angle_deg < 10:
+                    margin = sweep_angle_deg - 10
                     return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° < 12°, margin={margin:.1f}°)", metrics
                 else:
                     return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° >= 360°)", metrics
@@ -448,6 +448,36 @@ class ArcReconstructor:
                     })
                     print(
                         f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected fit - detour={detour_index:.4f}, reason={diagnostic}, center=({chain_center[0]:.1f}, {chain_center[1]:.1f}), bbox=({chain_bbox[0]:.1f},{chain_bbox[1]:.1f})-({chain_bbox[2]:.1f},{chain_bbox[3]:.1f})")
+
+                    # TEMPORARY: Log detailed info for chains near target area (894.4, 1587)
+                    target_x, target_y = 894.4, 1587.0
+                    tolerance = 50.0  # Within 50 units
+                    if abs(chain_center[0] - target_x) < tolerance and abs(chain_center[1] - target_y) < tolerance:
+                        print(
+                            f"\n*** TARGET AREA REJECTION (near {target_x}, {target_y}) ***")
+                        print(
+                            f"  Chain {chain_idx}: center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
+                        print(f"  Rejection reason: {diagnostic}")
+                        print(f"  Detour index: {detour_index:.4f}")
+                        print(
+                            f"  Bbox: ({chain_bbox[0]:.1f}, {chain_bbox[1]:.1f}) to ({chain_bbox[2]:.1f}, {chain_bbox[3]:.1f})")
+                        if metrics:
+                            print(f"  Metrics:")
+                            if metrics.get('radius') is not None:
+                                print(f"    radius: {metrics['radius']:.2f}")
+                            if metrics.get('sweep_angle_deg') is not None:
+                                print(
+                                    f"    sweep_angle: {metrics['sweep_angle_deg']:.1f}°")
+                            if metrics.get('chord_radius_ratio') is not None:
+                                print(
+                                    f"    chord_radius_ratio: {metrics['chord_radius_ratio']:.2f}")
+                            if metrics.get('error_threshold') is not None:
+                                print(
+                                    f"    error_threshold: {metrics['error_threshold']:.2f}")
+                            if metrics.get('max_error') is not None:
+                                print(
+                                    f"    max_error: {metrics['max_error']:.2f}")
+                        print(f"*** END TARGET AREA REJECTION ***\n")
             else:
                 rejected_detour += 1
                 rejected_chains.append({
@@ -460,6 +490,21 @@ class ArcReconstructor:
                 })
                 print(
                     f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected detour - detour_index={detour_index:.4f} (need >1.01), center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
+
+                # TEMPORARY: Log detailed info for chains near target area (894.4, 1587)
+                target_x, target_y = 894.4, 1587.0
+                tolerance = 50.0  # Within 50 units
+                if abs(chain_center[0] - target_x) < tolerance and abs(chain_center[1] - target_y) < tolerance:
+                    print(
+                        f"\n*** TARGET AREA REJECTION (near {target_x}, {target_y}) ***")
+                    print(
+                        f"  Chain {chain_idx}: center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
+                    print(
+                        f"  Rejection reason: detour_too_low (detour_index={detour_index:.4f} <= 1.01)")
+                    print(f"  Detour index: {detour_index:.4f}")
+                    print(
+                        f"  Bbox: ({chain_bbox[0]:.1f}, {chain_bbox[1]:.1f}) to ({chain_bbox[2]:.1f}, {chain_bbox[3]:.1f})")
+                    print(f"*** END TARGET AREA REJECTION ***\n")
 
         fit_time = time.time()
         total_time = fit_time - start_time

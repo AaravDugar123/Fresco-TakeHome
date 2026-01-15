@@ -70,15 +70,11 @@ for y in range(0, int(page_height) + label_spacing, label_spacing):
 
 print(f"  Coordinate labels added: {label_spacing} unit spacing")
 
-# Draw boxes around each rejected chain with detailed labels
-print("\nDrawing rejected chain boxes...")
+# Draw boxes around each rejected chain with coordinates only
+print("\nDrawing rejected chain boxes with coordinates...")
 for chain_info in rejected_chains:
     bbox = chain_info['bbox']  # (min_x, min_y, max_x, max_y)
     center = chain_info['center']  # (x, y)
-    chain_idx = chain_info['chain_idx']
-    reason = chain_info.get('reason', 'unknown')
-    detour_index = chain_info.get('detour_index', 0)
-    metrics = chain_info.get('metrics', {})
 
     # Create a shape for the box
     shape = page.new_shape()
@@ -92,20 +88,17 @@ for chain_info in rejected_chains:
     shape.commit()
 
     # Determine label position (above or below box)
-    if bbox[3] + 50 < page_height:
+    if bbox[3] + 30 < page_height:
         # Label above the box
-        label_y = bbox[3] + 8
-        line_spacing = 10
+        label_y = bbox[3] + 10
     else:
         # Label below the box
         label_y = bbox[1] - 5
-        line_spacing = -10
 
     label_x = bbox[0]  # Left edge of box
 
-    # Create detailed text labels
-    # Line 1: Chain index and coordinates
-    coord_text = f"#{chain_idx}: ({center[0]:.1f}, {center[1]:.1f})"
+    # Draw only coordinates
+    coord_text = f"({center[0]:.1f}, {center[1]:.1f})"
     page.insert_text(
         pymupdf.Point(label_x, label_y),
         coord_text,
@@ -113,48 +106,6 @@ for chain_info in rejected_chains:
         color=(1, 0, 0),  # Red text
         render_mode=0
     )
-
-    # Line 2: Detour index
-    if detour_index > 0:
-        detour_text = f"detour={detour_index:.4f}"
-        page.insert_text(
-            pymupdf.Point(label_x, label_y + line_spacing),
-            detour_text,
-            fontsize=7,
-            color=(0.8, 0, 0),
-            render_mode=0
-        )
-
-    # Line 3: Rejection reason (shortened)
-    reason_short = reason.split('(')[0] if '(' in reason else reason[:30]
-    if len(reason_short) > 0:
-        page.insert_text(
-            pymupdf.Point(label_x, label_y + line_spacing * 2),
-            reason_short[:30],
-            fontsize=6,
-            color=(0.7, 0, 0),
-            render_mode=0
-        )
-
-    # Line 4: Metrics if available
-    if metrics:
-        metrics_parts = []
-        if metrics.get('radius') is not None:
-            metrics_parts.append(f"r={metrics['radius']:.1f}")
-        if metrics.get('sweep_angle_deg') is not None:
-            metrics_parts.append(f"θ={metrics['sweep_angle_deg']:.1f}°")
-        if metrics.get('chord_radius_ratio') is not None:
-            metrics_parts.append(f"c/r={metrics['chord_radius_ratio']:.2f}")
-
-        if metrics_parts:
-            metrics_text = ", ".join(metrics_parts[:3])  # Limit to 3 metrics
-            page.insert_text(
-                pymupdf.Point(label_x, label_y + line_spacing * 3),
-                metrics_text[:35],
-                fontsize=5,
-                color=(0.6, 0, 0),
-                render_mode=0
-            )
 
 # Save output
 output_dir = Path(__file__).parent.parent / "Data" / "Output_drawings"
