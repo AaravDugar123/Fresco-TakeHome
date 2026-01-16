@@ -495,7 +495,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
 
             # Check touch using the actual function (for both logic and debug)
             touch_result = check_arc_line_touch(arc, line, arc_radius)
-            touch_threshold = arc_radius * 0.6  # LOOK here for touch check normal
+            touch_threshold = arc_radius * 0.85  # LOOK here for touch check normal
 
             if debug:
                 # Always calculate touch distance for detailed info

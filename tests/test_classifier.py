@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
-    "CFStat_ATT-PFMD-102125-Drawings-CF_Station_227_New_Build.pdf_-_Page_22.pdf"
+    "HighDesertDemo_High_Desert_Demo.pdf_-_Page_6.pdf"
 
 # Start timing
 start_time = time.time()
