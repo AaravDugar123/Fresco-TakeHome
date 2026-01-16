@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
-    "CopellIndependent_NA02-01_-_FLOOR_PLAN_-LEVEL_ONE_-_CoppellIndependent.pdf_-_Page_30.pdf"
+    "FirstSource_R25-01360-A-V03.pdf_-_Page_2.pdf"
 
 print("Extracting vectors...")
 result = extract_vectors(str(pdf_path))

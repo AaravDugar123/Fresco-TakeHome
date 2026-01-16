@@ -228,7 +228,7 @@ class ArcReconstructor:
         # Build spatial index: map grid cell -> list of segment indices
         # Use cell_size = gap_tolerance * 0.75 with 2x2 neighborhood
         # This limits candidates to ~1.06 * gap_tolerance away (tight control)
-        cell_size = self.gap_tolerance * 0.75
+        cell_size = self.gap_tolerance * .33
         spatial_index = {}
 
         def get_cell_key(point):
@@ -251,18 +251,31 @@ class ArcReconstructor:
 
         def get_candidate_indices(segment):
             """Get candidate segment indices that might connect to this segment.
-            Uses a 2x2 neighborhood (immediate neighbors only) for tight control."""
+            Uses spatial index for speed, then filters by actual distance to ensure
+            we find all segments within gap_tolerance regardless of cell size."""
             candidates = set()
-            # Check cells for both endpoints with 2x2 neighborhood
+            gap_tolerance_sq = self.gap_tolerance * self.gap_tolerance
+            
+            # Check cells for both endpoints with 3x3 neighborhood (larger to catch more)
+            # We'll filter by distance anyway, so checking more cells is safe
             for point in [segment['start'], segment['end']]:
                 cell_key = get_cell_key(point)
-                # Check 2x2 neighborhood (current cell + immediate neighbors)
-                # This limits search to ~1.06 * gap_tolerance away
-                for dx in [0, 1]:
-                    for dy in [0, 1]:
+                # Check 3x3 neighborhood to ensure we don't miss segments
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
                         neighbor_key = (cell_key[0] + dx, cell_key[1] + dy)
                         if neighbor_key in spatial_index:
-                            candidates.update(spatial_index[neighbor_key])
+                            # Filter by actual distance - only add if within gap_tolerance
+                            for candidate_idx in spatial_index[neighbor_key]:
+                                candidate_seg = segments[candidate_idx][1]
+                                # Quick distance check: are any endpoints within gap_tolerance?
+                                min_dist_sq = float('inf')
+                                for p1 in [point]:
+                                    for p2 in [candidate_seg['start'], candidate_seg['end']]:
+                                        dist_sq = self._squared_distance(p1, p2)
+                                        min_dist_sq = min(min_dist_sq, dist_sq)
+                                if min_dist_sq <= gap_tolerance_sq:
+                                    candidates.add(candidate_idx)
             return candidates
 
         chains = []
