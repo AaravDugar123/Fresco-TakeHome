@@ -65,7 +65,7 @@ class ArcReconstructor:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
         self.segment_max_threshold = page_diagonal * 0.003
         self.segment_min_threshold = page_diagonal * 0.00035
-        self.gap_tolerance = page_diagonal * 0.001
+        self.gap_tolerance = page_diagonal * 0.0009
 
     def _is_short_segment(self, line: Dict) -> bool:
         """Check if line is short enough to be a tessellated segment (but not too small - dust)."""
@@ -226,9 +226,9 @@ class ArcReconstructor:
             return []
 
         # Build spatial index: map grid cell -> list of segment indices
-        # Use smaller cell size for better coverage (more lenient)
-        # cell_size = gap_tolerance * 1.5 ensures we catch nearby segments
-        cell_size = self.gap_tolerance * 1.5
+        # Use cell_size = gap_tolerance * 0.75 with 2x2 neighborhood
+        # This limits candidates to ~1.06 * gap_tolerance away (tight control)
+        cell_size = self.gap_tolerance * 0.75
         spatial_index = {}
 
         def get_cell_key(point):
@@ -251,14 +251,15 @@ class ArcReconstructor:
 
         def get_candidate_indices(segment):
             """Get candidate segment indices that might connect to this segment.
-            Uses a larger 5x5 neighborhood for leniency."""
+            Uses a 2x2 neighborhood (immediate neighbors only) for tight control."""
             candidates = set()
-            # Check cells for both endpoints with larger neighborhood
+            # Check cells for both endpoints with 2x2 neighborhood
             for point in [segment['start'], segment['end']]:
                 cell_key = get_cell_key(point)
-                # Check 5x5 neighborhood (more lenient than 3x3)
-                for dx in [-2, -1, 0, 1, 2]:
-                    for dy in [-2, -1, 0, 1, 2]:
+                # Check 2x2 neighborhood (current cell + immediate neighbors)
+                # This limits search to ~1.06 * gap_tolerance away
+                for dx in [0, 1]:
+                    for dy in [0, 1]:
                         neighbor_key = (cell_key[0] + dx, cell_key[1] + dy)
                         if neighbor_key in spatial_index:
                             candidates.update(spatial_index[neighbor_key])
@@ -294,7 +295,7 @@ class ArcReconstructor:
                 # This is less greedy - finds multiple connections per iteration
                 segments_to_add_end = []
                 segments_to_add_start = []
-                
+
                 for j in candidates:
                     if j in used or j >= len(segments):
                         continue
@@ -310,26 +311,28 @@ class ArcReconstructor:
                     if connects_to_end:
                         if not self._would_reverse_curve(chain, other_seg, add_to_end=True):
                             if self._continues_smoothly(chain, other_seg, add_to_end=True):
-                                segments_to_add_end.append((j, other_orig_idx, other_seg))
+                                segments_to_add_end.append(
+                                    (j, other_orig_idx, other_seg))
                     elif connects_to_start:
                         if not self._would_reverse_curve(chain, other_seg, add_to_end=False):
                             if self._continues_smoothly(chain, other_seg, add_to_end=False):
-                                segments_to_add_start.append((j, other_orig_idx, other_seg))
-                
+                                segments_to_add_start.append(
+                                    (j, other_orig_idx, other_seg))
+
                 # Add segments to end (in order found)
                 for j, other_orig_idx, other_seg in segments_to_add_end:
                     if j not in used:  # Double-check in case of duplicates
                         chain.append((other_orig_idx, other_seg))
                         used.add(j)
                         changed = True
-                
+
                 # Add segments to start (in reverse order to maintain chain order)
                 for j, other_orig_idx, other_seg in reversed(segments_to_add_start):
                     if j not in used:  # Double-check in case of duplicates
                         chain.insert(0, (other_orig_idx, other_seg))
                         used.add(j)
                         changed = True
-                
+
                 # Break and restart while loop with updated chain endpoints
                 # This allows the algorithm to find connections from the newly added segments
 

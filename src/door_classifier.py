@@ -163,23 +163,30 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
         margin_from_min_angle = sweep_angle - 12.5
         margin_to_max_angle = 120 - sweep_angle
         closest_angle_limit = min(margin_from_min_angle, margin_to_max_angle)
-        
+
         # Rule 2 margins
         margin_from_min_ratio = ratio - min_ratio
         margin_to_max_ratio = max_ratio - ratio
         closest_ratio_limit = min(margin_from_min_ratio, margin_to_max_ratio)
-        
-        print(f"  Rule 1 (Sweep Angle): {sweep_angle:.1f}° [required: 12.5-120°]")
+
+        print(
+            f"  Rule 1 (Sweep Angle): {sweep_angle:.1f}° [required: 12.5-120°]")
         print(f"    Margin from min (12.5°): {margin_from_min_angle:.1f}°")
         print(f"    Margin to max (120°): {margin_to_max_angle:.1f}°")
-        print(f"    Closest to limit: {closest_angle_limit:.1f}° {'(MIN)' if margin_from_min_angle < margin_to_max_angle else '(MAX)'}")
-        
-        print(f"  Rule 2 (Line/Radius Ratio): {ratio:.4f} [required: {min_ratio:.4f}-{max_ratio:.4f}]")
+        print(
+            f"    Closest to limit: {closest_angle_limit:.1f}° {'(MIN)' if margin_from_min_angle < margin_to_max_angle else '(MAX)'}")
+
+        print(
+            f"  Rule 2 (Line/Radius Ratio): {ratio:.4f} [required: {min_ratio:.4f}-{max_ratio:.4f}]")
         print(f"    Line length: {line_length:.2f}, Radius: {arc_radius:.2f}")
-        print(f"    Expected ratio: {expected_ratio:.4f} (for {sweep_angle:.1f}° sweep)")
-        print(f"    Margin from min ({min_ratio:.4f}): {margin_from_min_ratio:.4f}")
-        print(f"    Margin to max ({max_ratio:.4f}): {margin_to_max_ratio:.4f}")
-        print(f"    Closest to limit: {closest_ratio_limit:.4f} {'(MIN)' if margin_from_min_ratio < margin_to_max_ratio else '(MAX)'}")
+        print(
+            f"    Expected ratio: {expected_ratio:.4f} (for {sweep_angle:.1f}° sweep)")
+        print(
+            f"    Margin from min ({min_ratio:.4f}): {margin_from_min_ratio:.4f}")
+        print(
+            f"    Margin to max ({max_ratio:.4f}): {margin_to_max_ratio:.4f}")
+        print(
+            f"    Closest to limit: {closest_ratio_limit:.4f} {'(MIN)' if margin_from_min_ratio < margin_to_max_ratio else '(MAX)'}")
 
     return {
         "type": "swing_door",
@@ -294,7 +301,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                     np.linalg.norm(arc_end - line_end_arr)
                 ]
                 min_touch_dist = min(distances)
-                
+
                 if touch_result:
                     lines_passed_touch += 1
                     # Store touch info for the matching line (shown later)
@@ -359,7 +366,8 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 elif debug and touch_result:  # Show triangle angle info when touch passes
                     margin_to_reject = 100 - angle_deg
                     print(f"  Triangle Angle Check: PASSED")
-                    print(f"    Hinge angle: {angle_deg:.1f}° (threshold: 100°)")
+                    print(
+                        f"    Hinge angle: {angle_deg:.1f}° (threshold: 100°)")
                     print(f"    Margin to rejection: {margin_to_reject:.1f}°")
 
             door = classify_swing_door(
@@ -370,7 +378,8 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                     # Show touch info for the matching line
                     if touch_info is not None:
                         print(f"  Touch Check: PASSED")
-                        print(f"    Min distance: {touch_info['min_distance']:.2f} (threshold: {touch_info['threshold']:.2f})")
+                        print(
+                            f"    Min distance: {touch_info['min_distance']:.2f} (threshold: {touch_info['threshold']:.2f})")
                         print(f"    Margin: {touch_info['margin']:.2f}")
                 swing_doors.append(door)
                 used_lines.add(i)
