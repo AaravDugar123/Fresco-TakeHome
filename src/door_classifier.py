@@ -456,7 +456,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
         arc_rect = arc['path_rect']
         arc_x0, arc_y0, arc_x1, arc_y1 = arc_rect
 
-        buffer = arc_radius * .5  # LOOK HERE bbox
+        buffer = arc_radius * .7  # LOOK HERE bbox
         arc_bbox = (arc_x0 - buffer, arc_y0 - buffer,
                     arc_x1 + buffer, arc_y1 + buffer)
 
@@ -495,8 +495,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
 
             # Check touch using the actual function (for both logic and debug)
             touch_result = check_arc_line_touch(arc, line, arc_radius)
-            # Use the same threshold as check_arc_line_touch for debug output
-            touch_threshold = arc_radius * 0.85 #LOOK here for touch check normal
+            touch_threshold = arc_radius * 0.6  # LOOK here for touch check normal
 
             if debug:
                 # Always calculate touch distance for detailed info
@@ -570,7 +569,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 angle_deg = np.degrees(np.arccos(cos_angle))
 
                 # Reject if angle > 100° (arc curves toward line, not away)
-                if angle_deg > 125:
+                if angle_deg > 142:  # look here triangle test
                     if debug:
                         rejection_reason = f"Arc faces wrong way (hinge angle={angle_deg:.1f}° > 100°)"
                     continue
@@ -628,7 +627,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
     double_doors = []
     if page_width is not None and page_height is not None and len(swing_doors) > 1:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
-        buffer = page_diagonal * 0.0005 #overlapping single doors look here
+        buffer = page_diagonal * 0.00025  # overlapping single doors look here
 
         # Pre-calculate all bboxes once (fast path using path_rect)
         door_bboxes = []
