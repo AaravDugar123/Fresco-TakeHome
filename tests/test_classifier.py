@@ -33,13 +33,18 @@ analysis = analyze_geometry(
 
 # Classify swing doors (use pre-filtered candidates to avoid redundant checks)
 print("Classifying swing doors...")
-swing_doors = classify_swing_doors(
+door_result = classify_swing_doors(
     analysis['door_candidate_arcs'],  # Use pre-filtered arcs
     analysis['filtered_lines'],
-    debug=True  # Enable debug output
+    debug=True,  # Enable debug output
+    page_width=result['page_width'],
+    page_height=result['page_height']
 )
 
-print(f"\nFound {len(swing_doors)} swing doors")
+swing_doors = door_result['swing_doors']
+double_doors = door_result['double_doors']
+
+print(f"\nFound {len(swing_doors)} swing doors, {len(double_doors)} double doors")
 
 # Open PDF and draw rectangles
 doc = pymupdf.open(str(pdf_path))
@@ -131,6 +136,62 @@ for i, door in enumerate(swing_doors):
 
     print(
         f"Swing door {i}: bbox=({min_x:.1f}, {min_y:.1f}, {max_x:.1f}, {max_y:.1f})")
+
+# Draw blue rectangles around each double door
+for i, double_door in enumerate(double_doors):
+    # Use the combined bbox from the double door
+    bbox = double_door.get('bbox')
+    if bbox:
+        min_x, min_y, max_x, max_y = bbox
+    else:
+        # Fallback: calculate from arc and line
+        arc = double_door['arc']
+        line = double_door['line']
+        
+        arc_rect = arc.get('path_rect')
+        line_rect = line.get('path_rect')
+        
+        if arc_rect:
+            if isinstance(arc_rect, pymupdf.Rect):
+                arc_bbox = (arc_rect.x0, arc_rect.y0, arc_rect.x1, arc_rect.y1)
+            else:
+                arc_bbox = arc_rect
+        else:
+            control_points = arc['control_points']
+            all_x = [p[0] for p in control_points]
+            all_y = [p[1] for p in control_points]
+            arc_bbox = (min(all_x), min(all_y), max(all_x), max(all_y))
+        
+        if line_rect:
+            if isinstance(line_rect, pymupdf.Rect):
+                line_bbox = (line_rect.x0, line_rect.y0, line_rect.x1, line_rect.y1)
+            else:
+                line_bbox = line_rect
+        else:
+            start = line['start']
+            end = line['end']
+            line_bbox = (min(start[0], end[0]), min(start[1], end[1]),
+                         max(start[0], end[0]), max(start[1], end[1]))
+        
+        min_x = min(arc_bbox[0], line_bbox[0])
+        min_y = min(arc_bbox[1], line_bbox[1])
+        max_x = max(arc_bbox[2], line_bbox[2])
+        max_y = max(arc_bbox[3], line_bbox[3])
+    
+    # Add padding
+    padding = 10
+    rect = pymupdf.Rect(
+        min_x - padding,
+        min_y - padding,
+        max_x + padding,
+        max_y + padding
+    )
+    
+    # Draw blue rectangle
+    page.draw_rect(rect, color=(0, 0, 1), width=2)  # Blue color
+    
+    print(
+        f"Double door {i}: bbox=({min_x:.1f}, {min_y:.1f}, {max_x:.1f}, {max_y:.1f})")
 
 # Save output
 output_dir = Path(__file__).parent.parent / "Data" / "Output_drawings"

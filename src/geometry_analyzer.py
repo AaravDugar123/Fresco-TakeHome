@@ -212,23 +212,31 @@ class ArcReconstructor:
                         if len(chain) >= 2:
                             last_seg = chain[-1][1]
                             prev_seg = chain[-2][1]
-                            last_dir = np.array(last_seg['end']) - np.array(last_seg['start'])
-                            prev_dir = np.array(prev_seg['end']) - np.array(prev_seg['start'])
+                            last_dir = np.array(
+                                last_seg['end']) - np.array(last_seg['start'])
+                            prev_dir = np.array(
+                                prev_seg['end']) - np.array(prev_seg['start'])
                             curve_dir = last_dir + prev_dir  # Overall curve direction
-                            
-                            new_s, new_e = np.array(other_seg['start']), np.array(other_seg['end'])
+
+                            new_s, new_e = np.array(
+                                other_seg['start']), np.array(other_seg['end'])
                             connect_pt = np.array(last_seg['end'])
                             dist_s = np.linalg.norm(connect_pt - new_s)
                             dist_e = np.linalg.norm(connect_pt - new_e)
-                            new_dir = (new_e - connect_pt) if dist_s <= dist_e else (new_s - connect_pt)
-                            
-                            curve_norm, new_norm = np.linalg.norm(curve_dir), np.linalg.norm(new_dir)
+                            new_dir = (
+                                new_e - connect_pt) if dist_s <= dist_e else (new_s - connect_pt)
+
+                            curve_norm, new_norm = np.linalg.norm(
+                                curve_dir), np.linalg.norm(new_dir)
                             if curve_norm > 1e-5 and new_norm > 1e-5:
-                                dot = np.dot(curve_dir / curve_norm, new_dir / new_norm)
-                                angle = np.degrees(np.arccos(np.clip(dot, -1.0, 1.0)))
-                                if angle > 100:  # Significant reversal - don't merge (double door)
+                                dot = np.dot(curve_dir / curve_norm,
+                                             new_dir / new_norm)
+                                angle = np.degrees(
+                                    np.arccos(np.clip(dot, -1.0, 1.0)))
+                                # Significant reversal - don't merge (double door)
+                                if angle > 100:
                                     continue
-                        
+
                         if self._continues_smoothly(chain, other_seg, add_to_end=True):
                             chain.append((other_orig_idx, other_seg))
                             used.add(j)
@@ -239,23 +247,31 @@ class ArcReconstructor:
                         if len(chain) >= 2:
                             first_seg = chain[0][1]
                             second_seg = chain[1][1]
-                            first_dir = np.array(first_seg['end']) - np.array(first_seg['start'])
-                            second_dir = np.array(second_seg['end']) - np.array(second_seg['start'])
+                            first_dir = np.array(
+                                first_seg['end']) - np.array(first_seg['start'])
+                            second_dir = np.array(
+                                second_seg['end']) - np.array(second_seg['start'])
                             curve_dir = first_dir + second_dir  # Overall curve direction
-                            
-                            new_s, new_e = np.array(other_seg['start']), np.array(other_seg['end'])
+
+                            new_s, new_e = np.array(
+                                other_seg['start']), np.array(other_seg['end'])
                             connect_pt = np.array(first_seg['start'])
                             dist_s = np.linalg.norm(connect_pt - new_s)
                             dist_e = np.linalg.norm(connect_pt - new_e)
-                            new_dir = (connect_pt - new_e) if dist_s <= dist_e else (connect_pt - new_s)
-                            
-                            curve_norm, new_norm = np.linalg.norm(curve_dir), np.linalg.norm(new_dir)
+                            new_dir = (
+                                connect_pt - new_e) if dist_s <= dist_e else (connect_pt - new_s)
+
+                            curve_norm, new_norm = np.linalg.norm(
+                                curve_dir), np.linalg.norm(new_dir)
                             if curve_norm > 1e-5 and new_norm > 1e-5:
-                                dot = np.dot(curve_dir / curve_norm, new_dir / new_norm)
-                                angle = np.degrees(np.arccos(np.clip(dot, -1.0, 1.0)))
-                                if angle > 100:  # Significant reversal - don't merge (double door)
+                                dot = np.dot(curve_dir / curve_norm,
+                                             new_dir / new_norm)
+                                angle = np.degrees(
+                                    np.arccos(np.clip(dot, -1.0, 1.0)))
+                                # Significant reversal - don't merge (double door)
+                                if angle > 100:
                                     continue
-                        
+
                         if self._continues_smoothly(chain, other_seg, add_to_end=False):
                             chain.insert(0, (other_orig_idx, other_seg))
                             used.add(j)
