@@ -80,26 +80,8 @@ for y in range(0, int(page_height) + label_spacing, label_spacing):
 
 print(f"  Coordinate labels added: {label_spacing} unit spacing")
 
-# Helper to get door bbox
-def get_door_bbox(door):
-    arc, line = door['arc'], door['line']
-    arc_rect = arc.get('path_rect')
-    line_rect = line.get('path_rect')
-    
-    if arc_rect:
-        arc_bbox = arc_rect if isinstance(arc_rect, (list, tuple)) else (arc_rect.x0, arc_rect.y0, arc_rect.x1, arc_rect.y1)
-    else:
-        cp = arc['control_points']
-        arc_bbox = (min(p[0] for p in cp), min(p[1] for p in cp), max(p[0] for p in cp), max(p[1] for p in cp))
-    
-    if line_rect:
-        line_bbox = line_rect if isinstance(line_rect, (list, tuple)) else (line_rect.x0, line_rect.y0, line_rect.x1, line_rect.y1)
-    else:
-        s, e = line['start'], line['end']
-        line_bbox = (min(s[0], e[0]), min(s[1], e[1]), max(s[0], e[0]), max(s[1], e[1]))
-    
-    return (min(arc_bbox[0], line_bbox[0]), min(arc_bbox[1], line_bbox[1]),
-            max(arc_bbox[2], line_bbox[2]), max(arc_bbox[3], line_bbox[3]))
+# Helper to get door bbox (use fast version from door_classifier)
+from src.door_classifier import _get_door_bbox_fast as get_door_bbox
 
 # Draw red rectangles around each swing door
 for i, door in enumerate(swing_doors):

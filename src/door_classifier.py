@@ -44,29 +44,39 @@ def _get_bbox_from_rect(rect) -> tuple:
     return None
 
 
-def _get_door_bbox(door: Dict) -> tuple:
-    """Get combined bbox for a door (arc + line)."""
+def _get_door_bbox_fast(door: Dict) -> tuple:
+    """Fast bbox calculation - uses path_rect when available, avoids redundant calculations."""
     arc = door['arc']
     line = door['line']
-    
-    # Get arc bbox
+
+    # Fast path: use path_rect if available (most common case)
     arc_rect = arc.get('path_rect')
+    line_rect = line.get('path_rect')
+
+    if arc_rect and line_rect:
+        arc_bbox = _get_bbox_from_rect(arc_rect)
+        line_bbox = _get_bbox_from_rect(line_rect)
+        if arc_bbox and line_bbox:
+            return (min(arc_bbox[0], line_bbox[0]), min(arc_bbox[1], line_bbox[1]),
+                    max(arc_bbox[2], line_bbox[2]), max(arc_bbox[3], line_bbox[3]))
+
+    # Fallback: calculate from points (rare case)
     if arc_rect:
         arc_bbox = _get_bbox_from_rect(arc_rect)
     else:
         cp = arc['control_points']
-        arc_bbox = (min(p[0] for p in cp), min(p[1] for p in cp),
-                   max(p[0] for p in cp), max(p[1] for p in cp))
-    
-    # Get line bbox
-    line_rect = line.get('path_rect')
+        # Use list comprehension with single pass
+        xs = [p[0] for p in cp]
+        ys = [p[1] for p in cp]
+        arc_bbox = (min(xs), min(ys), max(xs), max(ys))
+
     if line_rect:
         line_bbox = _get_bbox_from_rect(line_rect)
     else:
         s, e = line['start'], line['end']
-        line_bbox = (min(s[0], e[0]), min(s[1], e[1]), max(s[0], e[0]), max(s[1], e[1]))
-    
-    # Combined bbox
+        line_bbox = (min(s[0], e[0]), min(s[1], e[1]),
+                     max(s[0], e[0]), max(s[1], e[1]))
+
     return (min(arc_bbox[0], line_bbox[0]), min(arc_bbox[1], line_bbox[1]),
             max(arc_bbox[2], line_bbox[2]), max(arc_bbox[3], line_bbox[3]))
 
@@ -352,56 +362,66 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 print(
                     f"    Checked {lines_checked} lines, {lines_passed_bbox} passed bbox, {lines_passed_touch} passed touch")
 
-    # Detect double doors: find overlapping swing doors
+    # Detect double doors: find overlapping swing doors (minimal overhead)
     double_doors = []
     if page_width is not None and page_height is not None and len(swing_doors) > 1:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
         buffer = page_diagonal * 0.001
-        
-        # Calculate bbox for each door
+
+        # Pre-calculate all bboxes once (fast path using path_rect)
         door_bboxes = []
         for door in swing_doors:
-            bbox = _get_door_bbox(door)
-            door_bboxes.append((bbox[0] - buffer, bbox[1] - buffer, bbox[2] + buffer, bbox[3] + buffer))
-        
-        # Find overlapping pairs
-        used_indices = set()
-        for i in range(len(swing_doors)):
-            if i in used_indices:
-                continue
-            
-            bbox1 = door_bboxes[i]
-            for j in range(i + 1, len(swing_doors)):
-                if j in used_indices:
+            bbox = _get_door_bbox_fast(door)
+            door_bboxes.append(
+                (bbox[0] - buffer, bbox[1] - buffer, bbox[2] + buffer, bbox[3] + buffer))
+
+        # Simple O(n²) check - but only if there are few doors (early exit for many doors)
+        # For typical cases (<100 doors), this is fast enough
+        if len(swing_doors) > 100:
+            # Skip double door detection if too many doors (performance)
+            if debug:
+                print(
+                    f"\nDEBUG: Skipping double door detection ({len(swing_doors)} doors, too many)")
+        else:
+            used_indices = set()
+            for i in range(len(swing_doors)):
+                if i in used_indices:
                     continue
-                
-                bbox2 = door_bboxes[j]
-                
-                # Check overlap
-                if (bbox1[0] <= bbox2[2] and bbox2[0] <= bbox1[2] and
-                    bbox1[1] <= bbox2[3] and bbox2[1] <= bbox1[3]):
-                    # Create double door with combined bbox
-                    combined_bbox = (
-                        min(bbox1[0], bbox2[0]),
-                        min(bbox1[1], bbox2[1]),
-                        max(bbox1[2], bbox2[2]),
-                        max(bbox1[3], bbox2[3])
-                    )
-                    
-                    double_doors.append({
-                        'type': 'double_door',
-                        'bbox': combined_bbox
-                    })
-                    used_indices.add(i)
-                    used_indices.add(j)
-                    break
-        
-        # Remove double doors from swing doors
-        swing_doors = [door for idx, door in enumerate(swing_doors) if idx not in used_indices]
-        
-        if debug and double_doors:
-            print(f"\nDEBUG: Found {len(double_doors)} double door(s)")
-    
+
+                bbox1 = door_bboxes[i]
+                for j in range(i + 1, len(swing_doors)):
+                    if j in used_indices:
+                        continue
+
+                    bbox2 = door_bboxes[j]
+
+                    # Simple overlap check
+                    if (bbox1[0] <= bbox2[2] and bbox2[0] <= bbox1[2] and
+                            bbox1[1] <= bbox2[3] and bbox2[1] <= bbox1[3]):
+                        # Overlap found - create double door
+                        combined_bbox = (
+                            min(bbox1[0], bbox2[0]),
+                            min(bbox1[1], bbox2[1]),
+                            max(bbox1[2], bbox2[2]),
+                            max(bbox1[3], bbox2[3])
+                        )
+
+                        double_doors.append({
+                            'type': 'double_door',
+                            'bbox': combined_bbox
+                        })
+                        used_indices.add(i)
+                        used_indices.add(j)
+                        break  # One pair per door
+
+            # Remove double doors from swing doors
+            if used_indices:
+                swing_doors = [door for idx, door in enumerate(
+                    swing_doors) if idx not in used_indices]
+
+            if debug and double_doors:
+                print(f"\nDEBUG: Found {len(double_doors)} double door(s)")
+
     return {
         'swing_doors': swing_doors,
         'double_doors': double_doors
