@@ -208,12 +208,54 @@ class ArcReconstructor:
 
                     # Check if segment continues smoothly before adding
                     if connects_to_end:
+                        # Simple check: if segment reverses curve direction significantly (>100°), start new chain
+                        if len(chain) >= 2:
+                            last_seg = chain[-1][1]
+                            prev_seg = chain[-2][1]
+                            last_dir = np.array(last_seg['end']) - np.array(last_seg['start'])
+                            prev_dir = np.array(prev_seg['end']) - np.array(prev_seg['start'])
+                            curve_dir = last_dir + prev_dir  # Overall curve direction
+                            
+                            new_s, new_e = np.array(other_seg['start']), np.array(other_seg['end'])
+                            connect_pt = np.array(last_seg['end'])
+                            dist_s = np.linalg.norm(connect_pt - new_s)
+                            dist_e = np.linalg.norm(connect_pt - new_e)
+                            new_dir = (new_e - connect_pt) if dist_s <= dist_e else (new_s - connect_pt)
+                            
+                            curve_norm, new_norm = np.linalg.norm(curve_dir), np.linalg.norm(new_dir)
+                            if curve_norm > 1e-5 and new_norm > 1e-5:
+                                dot = np.dot(curve_dir / curve_norm, new_dir / new_norm)
+                                angle = np.degrees(np.arccos(np.clip(dot, -1.0, 1.0)))
+                                if angle > 100:  # Significant reversal - don't merge (double door)
+                                    continue
+                        
                         if self._continues_smoothly(chain, other_seg, add_to_end=True):
                             chain.append((other_orig_idx, other_seg))
                             used.add(j)
                             changed = True
                             break
                     elif connects_to_start:
+                        # Simple check: if segment reverses curve direction significantly (>100°), start new chain
+                        if len(chain) >= 2:
+                            first_seg = chain[0][1]
+                            second_seg = chain[1][1]
+                            first_dir = np.array(first_seg['end']) - np.array(first_seg['start'])
+                            second_dir = np.array(second_seg['end']) - np.array(second_seg['start'])
+                            curve_dir = first_dir + second_dir  # Overall curve direction
+                            
+                            new_s, new_e = np.array(other_seg['start']), np.array(other_seg['end'])
+                            connect_pt = np.array(first_seg['start'])
+                            dist_s = np.linalg.norm(connect_pt - new_s)
+                            dist_e = np.linalg.norm(connect_pt - new_e)
+                            new_dir = (connect_pt - new_e) if dist_s <= dist_e else (connect_pt - new_s)
+                            
+                            curve_norm, new_norm = np.linalg.norm(curve_dir), np.linalg.norm(new_dir)
+                            if curve_norm > 1e-5 and new_norm > 1e-5:
+                                dot = np.dot(curve_dir / curve_norm, new_dir / new_norm)
+                                angle = np.degrees(np.arccos(np.clip(dot, -1.0, 1.0)))
+                                if angle > 100:  # Significant reversal - don't merge (double door)
+                                    continue
+                        
                         if self._continues_smoothly(chain, other_seg, add_to_end=False):
                             chain.insert(0, (other_orig_idx, other_seg))
                             used.add(j)
@@ -726,30 +768,35 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
         if len(component) >= 3:
             total_sweep = sum(arc_data[idx]['sweep']
                               for idx in component if arc_data[idx] is not None)
-            
+
             if total_sweep > 200:
                 # Additional validation: check if arcs share similar centers and radii
                 # (annotation patterns form closed circles with uniform geometry)
-                centers = [arc_data[idx]['center'] for idx in component if arc_data[idx] is not None]
-                radii = [arc_data[idx]['radius'] for idx in component if arc_data[idx] is not None]
-                
+                centers = [arc_data[idx]['center']
+                           for idx in component if arc_data[idx] is not None]
+                radii = [arc_data[idx]['radius']
+                         for idx in component if arc_data[idx] is not None]
+
                 if len(centers) >= 3 and len(radii) >= 3:
                     # Check if centers are clustered (annotation patterns have similar centers)
                     centers_array = np.array(centers)
                     center_mean = np.mean(centers_array, axis=0)
-                    center_distances = [np.linalg.norm(c - center_mean) for c in centers]
-                    max_center_deviation = max(center_distances) if center_distances else float('inf')
-                    
+                    center_distances = [np.linalg.norm(
+                        c - center_mean) for c in centers]
+                    max_center_deviation = max(
+                        center_distances) if center_distances else float('inf')
+
                     # Check if radii are similar (annotation patterns have uniform radius)
                     radius_mean = np.mean(radii)
                     radius_deviations = [abs(r - radius_mean) for r in radii]
-                    max_radius_deviation = max(radius_deviations) if radius_deviations else float('inf')
-                    
+                    max_radius_deviation = max(
+                        radius_deviations) if radius_deviations else float('inf')
+
                     # Only filter if centers are close together AND radii are similar
                     # This prevents filtering door swing arcs that happen to touch annotation arcs
                     center_tolerance = page_diagonal * 0.01  # Centers within 1% of page diagonal
                     radius_tolerance = radius_mean * 0.2  # Radii within 20% of mean
-                    
+
                     if max_center_deviation < center_tolerance and max_radius_deviation < radius_tolerance:
                         arc_indices_to_remove.update(component)
 

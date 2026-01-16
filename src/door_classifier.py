@@ -74,8 +74,9 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
     # greater than 7.5 less than 120
     if sweep_angle is None or not (12.5 <= sweep_angle <= 120):  # LOOK HERE
         if debug:
-            coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
-            print(f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: {sweep_angle:.1f}° (required: 12.5-120°)" if sweep_angle else f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 1 failed - Sweep angle: None")
+            coord_str = f"center=({int(arc_center[0])}, {int(arc_center[1])})"
+            print(
+                f"  ✗ Rule 1 FAILED: Sweep angle {sweep_angle:.1f}° (required: 12.5-120°)" if sweep_angle else f"  ✗ Rule 1 FAILED: Sweep angle None")
         return None
 
     # Step 2: Ratio Check (Length vs Radius) - scaled by sweep angle
@@ -106,8 +107,8 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
 
     if not (min_ratio < ratio < max_ratio):
         if debug:
-            coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
-            print(f"  DEBUG: Arc {arc_idx} {coord_str} - Rule 2 failed - Ratio: {ratio:.2f} (line_length={line_length:.2f}, arc_radius={arc_radius:.2f}, sweep={sweep_angle:.1f}°, expected={expected_ratio:.2f}, allowed: {min_ratio:.2f}-{max_ratio:.2f})")
+            print(
+                f"  ✗ Rule 2 FAILED: Ratio {ratio:.2f} (line={line_length:.1f}, radius={arc_radius:.1f}, sweep={sweep_angle:.1f}°, expected={expected_ratio:.2f}, allowed: {min_ratio:.2f}-{max_ratio:.2f})")
         return None
 
     return {
@@ -147,17 +148,19 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
         arc_radius, arc_center = result
 
         if debug:
-            coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
-            print(f"\nDEBUG: Testing arc {arc_idx} {coord_str}")
+            coord_str = f"center=({int(arc_center[0])}, {int(arc_center[1])})"
             sweep = calculate_arc_sweep_angle(arc, arc_radius)
+            print(f"\n{'='*60}")
+            print(f"Arc {arc_idx} - {coord_str}")
             print(
-                f"  Arc radius: {arc_radius:.2f}, sweep: {sweep:.1f}°" if sweep else f"  Arc radius: {arc_radius:.2f}, sweep: None")
+                f"  Radius: {arc_radius:.1f}, Sweep: {sweep:.1f}°" if sweep else f"  Radius: {arc_radius:.1f}, Sweep: None")
 
             lines_checked = 0
             lines_passed_bbox = 0
             lines_passed_touch = 0
             closest_bbox_distance = float('inf')
             closest_touch_distance = float('inf')
+            rejection_reason = None
 
             # Pre-calculate arc bbox for efficiency using path_rect
         arc_rect = arc['path_rect']
@@ -271,39 +274,44 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 # Reject if angle > 100° (arc curves toward line, not away)
                 if angle_deg > 100:
                     if debug:
-                        coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
-                        print(
-                            f"  DEBUG: Arc {arc_idx} {coord_str} - Rejected: arc faces wrong way (hinge angle={angle_deg:.1f}° > 100°)")
+                        rejection_reason = f"Arc faces wrong way (hinge angle={angle_deg:.1f}° > 100°)"
                     continue
 
             door = classify_swing_door(
                 arc, line, arc_radius, arc_center, debug=debug, arc_idx=arc_idx)
             if door:
                 if debug:
-                    coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
-                    print(
-                        f"  DEBUG: Arc {arc_idx} {coord_str} matched with line {i} - All rules passed!")
+                    print(f"  ✓ MATCHED with line {i} - All rules passed!")
                 swing_doors.append(door)
                 used_lines.add(i)
                 used_arcs.add(arc_idx)
+                rejection_reason = None  # Clear rejection reason on match
                 break  # One line per arc
+            elif debug and lines_passed_touch > 0:
+                # Rule 1 or 2 failed (already printed in classify_swing_door)
+                rejection_reason = "Rule 1 or 2 failed (see above)"
 
         if debug:
-            print(
-                f"  Checked {lines_checked} lines, {lines_passed_bbox} passed bbox, {lines_passed_touch} passed touch")
             if lines_passed_touch == 0:
-                coord_str = f"center=({arc_center[0]:.1f}, {arc_center[1]:.1f})"
-                arc_bbox_str = f"bbox=({arc_bbox[0]:.1f}, {arc_bbox[1]:.1f}, {arc_bbox[2]:.1f}, {arc_bbox[3]:.1f})"
+                print(f"  ✗ NO MATCH - No lines passed touch check")
                 print(
-                    f"  DEBUG: Arc {arc_idx} {coord_str} {arc_bbox_str} - No lines passed touch check (all failed before Rule 1/2)")
+                    f"    Checked {lines_checked} lines, {lines_passed_bbox} passed bbox, {lines_passed_touch} passed touch")
                 if closest_bbox_distance < float('inf'):
                     print(
-                        f"  Closest bbox distance: {closest_bbox_distance:.2f} (threshold: overlap required)")
+                        f"    Closest bbox distance: {closest_bbox_distance:.1f} (need overlap)")
                 if closest_touch_distance < float('inf'):
                     print(
-                        f"  Closest touch distance: {closest_touch_distance:.2f} (threshold: {arc_radius * 0.01:.2f})")
+                        f"    Closest touch distance: {closest_touch_distance:.1f} (threshold: {arc_radius * 0.03:.1f})")
                 elif lines_passed_bbox == 0:
                     print(
-                        f"  Closest bbox distance: {closest_bbox_distance:.2f} (no lines passed bbox check)")
+                        f"    Closest bbox distance: {closest_bbox_distance:.1f} (no lines passed bbox)")
+            elif rejection_reason:
+                print(f"  ✗ NO MATCH - {rejection_reason}")
+                print(
+                    f"    Checked {lines_checked} lines, {lines_passed_bbox} passed bbox, {lines_passed_touch} passed touch")
+            else:
+                print(f"  ✓ MATCHED")
+                print(
+                    f"    Checked {lines_checked} lines, {lines_passed_bbox} passed bbox, {lines_passed_touch} passed touch")
 
     return swing_doors
