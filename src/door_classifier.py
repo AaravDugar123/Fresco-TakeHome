@@ -1,6 +1,6 @@
 """Geometry-based door classification rules."""
 import numpy as np
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from src.geometry_analyzer import get_bezier_radius
 
 
@@ -79,6 +79,209 @@ def _get_door_bbox_fast(door: Dict) -> tuple:
 
     return (min(arc_bbox[0], line_bbox[0]), min(arc_bbox[1], line_bbox[1]),
             max(arc_bbox[2], line_bbox[2]), max(arc_bbox[3], line_bbox[3]))
+
+
+def check_arcs_touch(arc1: Dict, arc2: Dict, threshold: float) -> Tuple[bool, Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]]:
+    """
+    Check if two arcs touch at one set of endpoints.
+
+    Args:
+        arc1: First arc dictionary with control_points
+        arc2: Second arc dictionary with control_points
+        threshold: Distance threshold for "touching"
+
+    Returns:
+        Tuple of (touches, endpoint_info) where:
+        - touches: True if arcs touch at endpoints
+        - endpoint_info: (arc1_touch_point, arc2_touch_point, arc1_other_point, arc2_other_point) if touching, None otherwise
+    """
+    arc1_start = np.array(arc1['control_points'][0])
+    arc1_end = np.array(arc1['control_points'][-1])
+    arc2_start = np.array(arc2['control_points'][0])
+    arc2_end = np.array(arc2['control_points'][-1])
+
+    # Check all 4 endpoint combinations
+    distances = [
+        (np.linalg.norm(arc1_start - arc2_start),
+         arc1_start, arc2_start, arc1_end, arc2_end),
+        (np.linalg.norm(arc1_start - arc2_end),
+         arc1_start, arc2_end, arc1_end, arc2_start),
+        (np.linalg.norm(arc1_end - arc2_start),
+         arc1_end, arc2_start, arc1_start, arc2_end),
+        (np.linalg.norm(arc1_end - arc2_end),
+         arc1_end, arc2_end, arc1_start, arc2_start)
+    ]
+
+    min_dist, touch1, touch2, other1, other2 = min(
+        distances, key=lambda x: x[0])
+
+    if min_dist <= threshold:
+        return True, (touch1, touch2, other1, other2)
+    return False, None
+
+
+def classify_edge_double_doors(double_door_candidates: List[Dict], debug: bool = True) -> List[Dict]:
+    """
+    Classify edge double doors from double door candidate arcs.
+
+    Edge double doors are two wide arcs (150-210°) that:
+    1. Touch each other at one set of endpoints
+    2. Have the other set of endpoints more than 1.5 radius away
+
+    Args:
+        double_door_candidates: List of arc dictionaries with 150-210° sweep angle
+        debug: Enable debug output
+
+    Returns:
+        List of edge double door dictionaries with 'type' and 'bbox'
+    """
+    if len(double_door_candidates) < 2:
+        return []
+
+    edge_double_doors = []
+    used_indices = set()
+
+    if debug:
+        print(f"\n{'='*60}")
+        print(
+            f"DEBUG classify_edge_double_doors: Checking {len(double_door_candidates)} double door candidates")
+
+    for i in range(len(double_door_candidates)):
+        if i in used_indices:
+            continue
+
+        arc1 = double_door_candidates[i]
+
+        # Get arc1 radius and geometry
+        result1 = get_bezier_radius(arc1['control_points'])
+        if result1 is None:
+            if debug:
+                print(f"  Arc {i}: Failed to calculate radius, skipping")
+            continue
+        radius1, center1 = result1
+
+        # Get sweep angle for arc1
+        sweep1 = calculate_arc_sweep_angle(arc1, radius1)
+
+        for j in range(i + 1, len(double_door_candidates)):
+            if j in used_indices:
+                continue
+
+            arc2 = double_door_candidates[j]
+
+            # Get arc2 radius
+            result2 = get_bezier_radius(arc2['control_points'])
+            if result2 is None:
+                if debug:
+                    print(f"  Arc {j}: Failed to calculate radius, skipping")
+                continue
+            radius2, center2 = result2
+
+            # Get sweep angle for arc2
+            sweep2 = calculate_arc_sweep_angle(arc2, radius2)
+
+            if debug:
+                print(f"\n  Checking arc pair ({i}, {j}):")
+                print(
+                    f"    Arc {i}: center=({int(center1[0])}, {int(center1[1])}), radius={radius1:.1f}, sweep={sweep1:.1f}°" if sweep1 else f"    Arc {i}: center=({int(center1[0])}, {int(center1[1])}), radius={radius1:.1f}, sweep=None")
+                print(
+                    f"    Arc {j}: center=({int(center2[0])}, {int(center2[1])}), radius={radius2:.1f}, sweep={sweep2:.1f}°" if sweep2 else f"    Arc {j}: center=({int(center2[0])}, {int(center2[1])}), radius={radius2:.1f}, sweep=None")
+
+            # Use the average radius for distance checks
+            avg_radius = (radius1 + radius2) / 2
+            touch_threshold_combined = avg_radius * 0.4
+
+            # Check if arcs touch at one set of endpoints
+            touches, endpoint_info = check_arcs_touch(
+                arc1, arc2, touch_threshold_combined)
+
+            if not touches:
+                # Calculate minimum distance between any endpoints for debug
+                arc1_start = np.array(arc1['control_points'][0])
+                arc1_end = np.array(arc1['control_points'][-1])
+                arc2_start = np.array(arc2['control_points'][0])
+                arc2_end = np.array(arc2['control_points'][-1])
+
+                min_endpoint_dist = min(
+                    np.linalg.norm(arc1_start - arc2_start),
+                    np.linalg.norm(arc1_start - arc2_end),
+                    np.linalg.norm(arc1_end - arc2_start),
+                    np.linalg.norm(arc1_end - arc2_end)
+                )
+
+                if debug:
+                    margin = touch_threshold_combined - min_endpoint_dist
+                    print(f"    ✗ FAILED: Arcs do not touch")
+                    print(
+                        f"      Min endpoint distance: {min_endpoint_dist:.2f} (threshold: {touch_threshold_combined:.2f})")
+                    print(
+                        f"      Margin: {margin:.2f} (need to be {abs(margin):.2f} closer)")
+                continue
+
+            # Extract the other endpoints (the ones that don't touch)
+            touch1, touch2, other1, other2 = endpoint_info
+            touch_distance = np.linalg.norm(touch1 - touch2)
+
+            # Check if the other endpoints are more than 1.5 radius away
+            other_endpoints_distance = np.linalg.norm(other1 - other2)
+            min_distance_required = 1.75 * avg_radius
+
+            if debug:
+                print(
+                    f"    ✓ Touch check PASSED: distance={touch_distance:.2f} (threshold: {touch_threshold_combined:.2f})")
+                print(
+                    f"      Touch points: ({int(touch1[0])}, {int(touch1[1])}) <-> ({int(touch2[0])}, {int(touch2[1])})")
+                print(
+                    f"      Other endpoints: ({int(other1[0])}, {int(other1[1])}) <-> ({int(other2[0])}, {int(other2[1])})")
+                print(
+                    f"      Other endpoints distance: {other_endpoints_distance:.2f} (required: >{min_distance_required:.2f})")
+
+            if other_endpoints_distance > min_distance_required:
+                # This is an edge double door!
+                # Calculate bounding box from both arcs
+                arc1_rect = arc1.get('path_rect')
+                arc2_rect = arc2.get('path_rect')
+
+                if arc1_rect and arc2_rect:
+                    arc1_bbox = _get_bbox_from_rect(arc1_rect)
+                    arc2_bbox = _get_bbox_from_rect(arc2_rect)
+
+                    if arc1_bbox and arc2_bbox:
+                        combined_bbox = (
+                            min(arc1_bbox[0], arc2_bbox[0]),
+                            min(arc1_bbox[1], arc2_bbox[1]),
+                            max(arc1_bbox[2], arc2_bbox[2]),
+                            max(arc1_bbox[3], arc2_bbox[3])
+                        )
+
+                        edge_double_doors.append({
+                            'type': 'double_door',
+                            'bbox': combined_bbox
+                        })
+                        used_indices.add(i)
+                        used_indices.add(j)
+
+                        if debug:
+                            margin = other_endpoints_distance - min_distance_required
+                            print(f"    ✓✓ MATCHED: Edge double door found!")
+                            print(
+                                f"      Margin: {margin:.2f} above required distance")
+                            print(
+                                f"      Combined bbox: ({combined_bbox[0]:.1f}, {combined_bbox[1]:.1f}, {combined_bbox[2]:.1f}, {combined_bbox[3]:.1f})")
+                        break  # One pair per arc
+                elif debug:
+                    print(f"    ✗ FAILED: Missing path_rect for one or both arcs")
+            else:
+                if debug:
+                    margin = min_distance_required - other_endpoints_distance
+                    print(f"    ✗ FAILED: Other endpoints too close")
+                    print(
+                        f"      Margin: {margin:.2f} (need to be {margin:.2f} farther apart)")
+
+    if debug and edge_double_doors:
+        print(f"\nDEBUG: Found {len(edge_double_doors)} edge double door(s)")
+
+    return edge_double_doors
 
 
 def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
@@ -198,7 +401,7 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
     }
 
 
-def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = False, page_width: float = None, page_height: float = None) -> Dict:
+def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = False, page_width: float = None, page_height: float = None, double_door_candidates: List[Dict] = None) -> Dict:
     """
     Classify all swing doors from arcs and lines.
 
@@ -208,6 +411,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
         debug: Enable debug output
         page_width: Page width for double door detection (optional)
         page_height: Page height for double door detection (optional)
+        double_door_candidates: List of double door candidate arcs (150-210° sweep) for edge double door detection (optional)
 
     Returns:
         Dictionary with 'swing_doors' and 'double_doors' lists
@@ -472,6 +676,16 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
 
             if debug and double_doors:
                 print(f"\nDEBUG: Found {len(double_doors)} double door(s)")
+
+    # Detect edge double doors from double door candidates (wide arcs that touch)
+    if double_door_candidates is not None and len(double_door_candidates) >= 2:
+        edge_double_doors = classify_edge_double_doors(
+            double_door_candidates, debug=debug)
+        # Merge edge double doors into the double_doors list
+        double_doors.extend(edge_double_doors)
+        if debug and edge_double_doors:
+            print(
+                f"DEBUG: Added {len(edge_double_doors)} edge double door(s) to double doors list")
 
     return {
         'swing_doors': swing_doors,
