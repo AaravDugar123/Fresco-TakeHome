@@ -341,7 +341,7 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
 
     # Scale bounds around expected ratio based on sweep angle
     # Wider tolerance for smaller angles (more variation in door designs)
-    if sweep_angle >= 60:  # LOOK HERE
+    if sweep_angle >= 60:  # LOOK HERE ratios
         # Larger angles: tighter bounds (0.6x to 1.3x expected)
         min_ratio = expected_ratio * 0.5
         max_ratio = expected_ratio * 1.3
@@ -456,7 +456,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
         arc_rect = arc['path_rect']
         arc_x0, arc_y0, arc_x1, arc_y1 = arc_rect
 
-        buffer = arc_radius * .5  # LOOK HERE
+        buffer = arc_radius * .5  # LOOK HERE bbox
         arc_bbox = (arc_x0 - buffer, arc_y0 - buffer,
                     arc_x1 + buffer, arc_y1 + buffer)
 
@@ -628,7 +628,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
     double_doors = []
     if page_width is not None and page_height is not None and len(swing_doors) > 1:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
-        buffer = page_diagonal * 0.0005
+        buffer = page_diagonal * 0.0005 #overlapping single doors look here
 
         # Pre-calculate all bboxes once (fast path using path_rect)
         door_bboxes = []
