@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
-    "CopellIndependent_NA02-01_-_FLOOR_PLAN_-LEVEL_ONE_-_CoppellIndependent.pdf_-_Page_30.pdf"
+    "CFStat_ATT-PFMD-102125-Drawings-CF_Station_227_New_Build.pdf_-_Page_22.pdf"
 
 print("Extracting vectors...")
 result = extract_vectors(str(pdf_path))
@@ -57,26 +57,25 @@ for arc in filtered_arcs:
         arc_shape.commit()
 
         # Calculate center using the same method as classifier
-        # The classifier uses get_bezier_radius() which returns (radius, midpoint)
-        # where midpoint is the point on the curve at t=0.5, not the actual circle center
-        # This matches what the classifier debug output shows
-        result = get_bezier_radius(control_points)
-        if result is not None:
-            radius, arc_center = result
-            # Use the midpoint (arc_center) which is what classifier shows
-            center = tuple(arc_center)
+        # For reconstructed arcs, use stored center if available (actual circle center)
+        # Otherwise, use get_bezier_radius() which returns midpoint
+        if 'center' in arc and 'radius' in arc:
+            # Reconstructed arc - use stored center
+            center = tuple(arc['center'])
         else:
-            # If get_bezier_radius fails, try using stored center if available
-            if 'center' in arc:
-                center = tuple(arc['center'])
+            # Original arc - calculate midpoint using get_bezier_radius()
+            result = get_bezier_radius(control_points)
+            if result is not None:
+                radius, arc_center = result
+                center = tuple(arc_center)
             else:
                 center = None
 
         # Draw center coordinates as text
         if center is not None:
-            # Round coordinates to integers for matching with classifier output
-            center_x = round(center[0])
-            center_y = round(center[1])
+            # Use int() to match classifier debug output format
+            center_x = int(center[0])
+            center_y = int(center[1])
             coord_text = f"({center_x}, {center_y})"
 
             # Insert text at the center point
@@ -107,20 +106,25 @@ for arc in double_door_candidates:
         arc_shape.commit()
 
         # Calculate center using the same method as classifier
-        result = get_bezier_radius(control_points)
-        if result is not None:
-            radius, arc_center = result
-            center = tuple(arc_center)
+        # For reconstructed arcs, use stored center if available (actual circle center)
+        # Otherwise, use get_bezier_radius() which returns midpoint
+        if 'center' in arc and 'radius' in arc:
+            # Reconstructed arc - use stored center
+            center = tuple(arc['center'])
         else:
-            if 'center' in arc:
-                center = tuple(arc['center'])
+            # Original arc - calculate midpoint using get_bezier_radius()
+            result = get_bezier_radius(control_points)
+            if result is not None:
+                radius, arc_center = result
+                center = tuple(arc_center)
             else:
                 center = None
 
         # Draw center coordinates as text (in blue)
         if center is not None:
-            center_x = round(center[0])
-            center_y = round(center[1])
+            # Use int() to match classifier debug output format
+            center_x = int(center[0])
+            center_y = int(center[1])
             coord_text = f"({center_x}, {center_y})"
 
             point = pymupdf.Point(center[0], center[1])

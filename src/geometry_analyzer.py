@@ -735,7 +735,7 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
 
     page_diagonal = np.sqrt(page_width**2 + page_height**2)
     # Squared distance for speed - slightly more aggressive: larger tolerance
-    touch_tolerance_sq = (page_diagonal * 0.0025) ** 2
+    touch_tolerance_sq = (page_diagonal * 0.004) ** 2
 
     n = len(arcs)
 
@@ -829,7 +829,7 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
             total_sweep = sum(arc_data[idx]['sweep']
                               for idx in component if arc_data[idx] is not None)
 
-            if total_sweep > 230:
+            if total_sweep > 220:
                 # Additional validation: check if arcs share similar centers and radii
                 # (annotation patterns form closed circles with uniform geometry)
                 centers = [arc_data[idx]['center']
@@ -850,8 +850,8 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
                         abs(r - radius_mean) for r in radii)
 
                     # More aggressive: slightly increased tolerances to catch more patterns
-                    center_tolerance = page_diagonal * 0.012
-                    radius_tolerance = radius_mean * 0.22
+                    center_tolerance = page_diagonal * 0.02
+                    radius_tolerance = radius_mean * 0.3
 
                     if max_center_deviation < center_tolerance and max_radius_deviation < radius_tolerance:
                         arc_indices_to_remove.update(component)

@@ -304,7 +304,7 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold = arc_radius * .02  # LOOK HERE
+    threshold = arc_radius * .05  # if the arc touches
     # has to be greater than .05
 
     distances = [
@@ -425,10 +425,16 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             continue
 
         # Cache arc geometry once per arc
-        result = get_bezier_radius(arc['control_points'])
-        if result is None:
-            continue  # Skip arcs that can't calculate radius
-        arc_radius, arc_center = result
+        # For reconstructed arcs, use stored center if available (actual circle center)
+        # Otherwise, use get_bezier_radius() which returns midpoint
+        if 'center' in arc and 'radius' in arc:
+            arc_center = np.array(arc['center'])
+            arc_radius = arc['radius']
+        else:
+            result = get_bezier_radius(arc['control_points'])
+            if result is None:
+                continue  # Skip arcs that can't calculate radius
+            arc_radius, arc_center = result
 
         if debug:
             coord_str = f"center=({int(arc_center[0])}, {int(arc_center[1])})"
@@ -450,7 +456,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
         arc_rect = arc['path_rect']
         arc_x0, arc_y0, arc_x1, arc_y1 = arc_rect
 
-        buffer = arc_radius * .2
+        buffer = arc_radius * .5  # LOOK HERE
         arc_bbox = (arc_x0 - buffer, arc_y0 - buffer,
                     arc_x1 + buffer, arc_y1 + buffer)
 
@@ -489,7 +495,8 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
 
             # Check touch using the actual function (for both logic and debug)
             touch_result = check_arc_line_touch(arc, line, arc_radius)
-            touch_threshold = arc_radius * 0.03
+            # Use the same threshold as check_arc_line_touch for debug output
+            touch_threshold = arc_radius * 0.85 #LOOK here for touch check normal
 
             if debug:
                 # Always calculate touch distance for detailed info
@@ -563,12 +570,12 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 angle_deg = np.degrees(np.arccos(cos_angle))
 
                 # Reject if angle > 100° (arc curves toward line, not away)
-                if angle_deg > 100:
+                if angle_deg > 125:
                     if debug:
                         rejection_reason = f"Arc faces wrong way (hinge angle={angle_deg:.1f}° > 100°)"
                     continue
                 elif debug and touch_result:  # Show triangle angle info when touch passes
-                    margin_to_reject = 100 - angle_deg
+                    margin_to_reject = 125 - angle_deg
                     print(f"  Triangle Angle Check: PASSED")
                     print(
                         f"    Hinge angle: {angle_deg:.1f}° (threshold: 100°)")
@@ -621,7 +628,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
     double_doors = []
     if page_width is not None and page_height is not None and len(swing_doors) > 1:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
-        buffer = page_diagonal * 0.001
+        buffer = page_diagonal * 0.0005
 
         # Pre-calculate all bboxes once (fast path using path_rect)
         door_bboxes = []
