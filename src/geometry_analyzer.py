@@ -255,7 +255,7 @@ class ArcReconstructor:
             we find all segments within gap_tolerance regardless of cell size."""
             candidates = set()
             gap_tolerance_sq = self.gap_tolerance * self.gap_tolerance
-            
+
             # Check cells for both endpoints with 3x3 neighborhood (larger to catch more)
             # We'll filter by distance anyway, so checking more cells is safe
             for point in [segment['start'], segment['end']]:
@@ -272,7 +272,8 @@ class ArcReconstructor:
                                 min_dist_sq = float('inf')
                                 for p1 in [point]:
                                     for p2 in [candidate_seg['start'], candidate_seg['end']]:
-                                        dist_sq = self._squared_distance(p1, p2)
+                                        dist_sq = self._squared_distance(
+                                            p1, p2)
                                         min_dist_sq = min(min_dist_sq, dist_sq)
                                 if min_dist_sq <= gap_tolerance_sq:
                                     candidates.add(candidate_idx)
@@ -693,15 +694,16 @@ class ArcReconstructor:
 
 def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, page_height: float) -> List[Dict]:
     """
-    Filter out groups of arcs that form circular annotation patterns (3+ arcs forming >200° circle).
+    Filter out groups of arcs that form circular annotation patterns (2+ arcs forming >180° circle).
     Optimized: builds connectivity graph once, uses BFS to find all connected components.
+    More aggressive: lower thresholds to catch more circular patterns.
     """
-    if len(arcs) < 3:
-        return arcs  # Need at least 3 arcs to form a circle pattern
+    if len(arcs) < 2:
+        return arcs  # Need at least 2 arcs to form a circle pattern
 
     page_diagonal = np.sqrt(page_width**2 + page_height**2)
-    # Squared distance for speed
-    touch_tolerance_sq = (page_diagonal * 0.002) ** 2
+    # Squared distance for speed - slightly more aggressive: larger tolerance
+    touch_tolerance_sq = (page_diagonal * 0.0025) ** 2
 
     n = len(arcs)
 
@@ -788,13 +790,14 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
                     visited.add(neighbor)
                     queue.append(neighbor)
 
-        # Check if this component matches the pattern (3+ arcs, >200° total)
+        # Check if this component matches the pattern (2+ arcs, >180° total)
         # BUT also verify they form a closed circle (similar centers and radii)
-        if len(component) >= 3:
+        # More aggressive: lowered from 3+ arcs to 2+ arcs, and from >200° to >180°
+        if len(component) >= 2:
             total_sweep = sum(arc_data[idx]['sweep']
                               for idx in component if arc_data[idx] is not None)
 
-            if total_sweep > 200:
+            if total_sweep > 230:
                 # Additional validation: check if arcs share similar centers and radii
                 # (annotation patterns form closed circles with uniform geometry)
                 centers = [arc_data[idx]['center']
@@ -802,7 +805,8 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
                 radii = [arc_data[idx]['radius']
                          for idx in component if arc_data[idx] is not None]
 
-                if len(centers) >= 3 and len(radii) >= 3:
+                # More aggressive: lowered from 3 to 2
+                if len(centers) >= 2 and len(radii) >= 2:
                     # Check if centers are clustered and radii are similar (annotation patterns)
                     centers_array = np.array(centers)
                     center_mean = np.mean(centers_array, axis=0)
@@ -813,9 +817,9 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
                     max_radius_deviation = max(
                         abs(r - radius_mean) for r in radii)
 
-                    # Only filter if centers are close together AND radii are similar
-                    center_tolerance = page_diagonal * 0.01
-                    radius_tolerance = radius_mean * 0.2
+                    # More aggressive: slightly increased tolerances to catch more patterns
+                    center_tolerance = page_diagonal * 0.012
+                    radius_tolerance = radius_mean * 0.22
 
                     if max_center_deviation < center_tolerance and max_radius_deviation < radius_tolerance:
                         arc_indices_to_remove.update(component)
