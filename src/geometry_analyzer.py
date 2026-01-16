@@ -512,14 +512,45 @@ class ArcReconstructor:
                 margin = 0.3 - chord_radius_ratio if chord_radius_ratio < 0.3 else chord_radius_ratio - 3.2
                 return None, f"chord_radius_ratio_out_of_range({chord_radius_ratio:.2f}, valid: 0.3-3.2, margin={margin:.2f})", metrics
 
-            # Calculate tangent directions
+            # Calculate tangent directions (perpendicular to radius vectors)
+            # Tangent = rotate radius 90°: [-sin(angle), cos(angle)] for CCW, [sin(angle), -cos(angle)] for CW
             start_tangent = np.array(
                 [-np.sin(start_angle), np.cos(start_angle)])
             end_tangent = np.array([-np.sin(end_angle), np.cos(end_angle)])
 
-            if diff < 0:
-                start_tangent = -start_tangent
-                end_tangent = -end_tangent
+            # For near-180° arcs, use actual chain direction to determine correct orientation
+            # The angle-based approach (diff) can be ambiguous for wide arcs
+            if len(points_array) >= 2:
+                # Get actual direction the chain is moving (from first to second point)
+                chain_dir = points_array[1] - points_array[0]
+                chain_dir_norm = chain_dir / \
+                    np.linalg.norm(chain_dir) if np.linalg.norm(
+                        chain_dir) > 1e-5 else None
+
+                if chain_dir_norm is not None:
+                    # Normalize start_tangent for comparison
+                    start_tangent_norm = start_tangent / \
+                        np.linalg.norm(start_tangent) if np.linalg.norm(
+                            start_tangent) > 1e-5 else start_tangent
+
+                    # Check if tangent aligns with chain direction
+                    # If dot product is negative, tangents point opposite to chain direction
+                    tangent_chain_dot = np.dot(
+                        start_tangent_norm, chain_dir_norm)
+
+                    # For near-180° arcs, we need to check both possible orientations
+                    # If the tangent doesn't align well with chain direction, flip it
+                    if tangent_chain_dot < 0:
+                        # Tangents point opposite to chain direction - flip them
+                        start_tangent = -start_tangent
+                        end_tangent = -end_tangent
+                        # Also flip diff to match
+                        diff = -diff
+            else:
+                # Fallback: use angle difference if chain direction unavailable
+                if diff < 0:
+                    start_tangent = -start_tangent
+                    end_tangent = -end_tangent
 
             sweep_rad = sweep_angle
             if sweep_rad < 1e-5:
