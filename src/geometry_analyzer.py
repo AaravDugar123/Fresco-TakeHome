@@ -58,9 +58,10 @@ def get_bezier_radius(control_points: List) -> Optional[Tuple[float, np.ndarray]
 class ArcReconstructor:
     """Reconstructs tessellated arcs from fragmented line segments."""
 
-    def __init__(self, page_width: float, page_height: float):
+    def __init__(self, page_width: float, page_height: float, debug: bool = False):
         self.page_width = page_width
         self.page_height = page_height
+        self.debug = debug
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
         self.segment_max_threshold = page_diagonal * 0.003
         self.segment_min_threshold = page_diagonal * 0.00035
@@ -212,12 +213,56 @@ class ArcReconstructor:
 
         dot = np.dot(curve_dir / curve_norm, new_dir / new_norm)
         angle = np.degrees(np.arccos(np.clip(dot, -1.0, 1.0)))
-        return angle > 120
+        return angle > 110
 
     def _chain_segments(self, segments: List[Tuple[int, Dict]]) -> List[List[Tuple[int, Dict]]]:
-        """Group connected segments into chains, avoiding intersecting lines."""
+        """Group connected segments into chains, avoiding intersecting lines.
+
+        Optimized with spatial indexing to reduce time complexity from O(n²) to ~O(n*k)
+        where k is the average number of segments in nearby spatial cells.
+        Uses lenient spatial indexing with fallback to ensure no connections are missed.
+        """
         if not segments:
             return []
+
+        # Build spatial index: map grid cell -> list of segment indices
+        # Use smaller cell size for better coverage (more lenient)
+        # cell_size = gap_tolerance * 1.5 ensures we catch nearby segments
+        cell_size = self.gap_tolerance * 1.5
+        spatial_index = {}
+
+        def get_cell_key(point):
+            """Get spatial grid cell key for a point."""
+            return (int(point[0] / cell_size), int(point[1] / cell_size))
+
+        # Index all segment endpoints AND midpoints for better coverage
+        for i, (orig_idx, seg) in enumerate(segments):
+            start_key = get_cell_key(seg['start'])
+            end_key = get_cell_key(seg['end'])
+            # Also index midpoint to catch segments that might connect
+            midpoint = ((seg['start'][0] + seg['end'][0]) / 2,
+                        (seg['start'][1] + seg['end'][1]) / 2)
+            mid_key = get_cell_key(midpoint)
+
+            for key in [start_key, end_key, mid_key]:
+                if key not in spatial_index:
+                    spatial_index[key] = []
+                spatial_index[key].append(i)
+
+        def get_candidate_indices(segment):
+            """Get candidate segment indices that might connect to this segment.
+            Uses a larger 5x5 neighborhood for leniency."""
+            candidates = set()
+            # Check cells for both endpoints with larger neighborhood
+            for point in [segment['start'], segment['end']]:
+                cell_key = get_cell_key(point)
+                # Check 5x5 neighborhood (more lenient than 3x3)
+                for dx in [-2, -1, 0, 1, 2]:
+                    for dy in [-2, -1, 0, 1, 2]:
+                        neighbor_key = (cell_key[0] + dx, cell_key[1] + dy)
+                        if neighbor_key in spatial_index:
+                            candidates.update(spatial_index[neighbor_key])
+            return candidates
 
         chains = []
         used = set()
@@ -229,12 +274,27 @@ class ArcReconstructor:
             chain = [(orig_idx, seg)]
             used.add(i)
             changed = True
+            fallback_used = False  # Track if we've used fallback for this chain
 
             while changed:
                 changed = False
-                for j, (other_orig_idx, other_seg) in enumerate(segments):
-                    if j in used:
+                # Get candidates from spatial index
+                candidates = get_candidate_indices(
+                    chain[-1][1]) | get_candidate_indices(chain[0][1])
+
+                # Safety fallback: if spatial index finds very few candidates and we haven't used fallback yet,
+                # check all remaining segments once to ensure we don't miss connections
+                # This is a lenient fallback that only triggers when spatial index seems insufficient
+                if not fallback_used and len(candidates) < 5 and len(chain) < 15:
+                    # Fallback: check all unused segments (slower but ensures completeness)
+                    candidates = set(range(len(segments))) - used
+                    fallback_used = True  # Only use fallback once per chain to balance speed/accuracy
+
+                for j in candidates:
+                    if j in used or j >= len(segments):
                         continue
+
+                    other_orig_idx, other_seg = segments[j]
 
                     connects_to_end = self._are_connected(
                         chain[-1][1], other_seg)
@@ -474,24 +534,26 @@ class ArcReconstructor:
             Tuple of (reconstructed_arcs, used_line_indices, rejected_chains)
             where rejected_chains is a list of dicts with chain info for visualization
         """
-        start_time = time.time()
+        start_time = time.time() if self.debug else None
 
         segments_with_indices = []
         for i, line in enumerate(lines):
             if self._is_short_segment(line):
                 segments_with_indices.append((i, line))
 
-        segment_time = time.time()
-        print(
-            f"DEBUG ArcReconstructor: Found {len(segments_with_indices)} candidate segments out of {len(lines)} total lines (took {segment_time - start_time:.3f}s)")
+        segment_time = time.time() if self.debug else None
+        if self.debug:
+            print(
+                f"DEBUG ArcReconstructor: Found {len(segments_with_indices)} candidate segments out of {len(lines)} total lines (took {segment_time - start_time:.3f}s)")
 
         if len(segments_with_indices) < 3:
             return [], set(), []
 
         chains = self._chain_segments(segments_with_indices)
-        chain_time = time.time()
-        print(
-            f"DEBUG ArcReconstructor: Formed {len(chains)} chains from segments (took {chain_time - segment_time:.3f}s)")
+        chain_time = time.time() if self.debug else None
+        if self.debug:
+            print(
+                f"DEBUG ArcReconstructor: Formed {len(chains)} chains from segments (took {chain_time - segment_time:.3f}s)")
 
         if not chains:
             return [], set(), []
@@ -524,8 +586,9 @@ class ArcReconstructor:
                     reconstructed_arcs.append(arc)
                     for orig_idx, _ in chain:
                         used_line_indices.add(orig_idx)
-                    print(
-                        f"DEBUG ArcReconstructor: Chain {chain_idx}: Reconstructed arc (radius={arc['radius']:.2f}, sweep={arc['sweep_angle']:.1f}°, center=({chain_center[0]:.1f}, {chain_center[1]:.1f}))")
+                    if self.debug:
+                        print(
+                            f"DEBUG ArcReconstructor: Chain {chain_idx}: Reconstructed arc (radius={arc['radius']:.2f}, sweep={arc['sweep_angle']:.1f}°, center=({chain_center[0]:.1f}, {chain_center[1]:.1f}))")
                 else:
                     rejected_fit += 1
                     fit_rejection_details.append(
@@ -538,8 +601,9 @@ class ArcReconstructor:
                         'detour_index': detour_index,
                         'metrics': metrics
                     })
-                    print(
-                        f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected fit - detour={detour_index:.4f}, reason={diagnostic}, center=({chain_center[0]:.1f}, {chain_center[1]:.1f}), bbox=({chain_bbox[0]:.1f},{chain_bbox[1]:.1f})-({chain_bbox[2]:.1f},{chain_bbox[3]:.1f})")
+                    if self.debug:
+                        print(
+                            f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected fit - detour={detour_index:.4f}, reason={diagnostic}, center=({chain_center[0]:.1f}, {chain_center[1]:.1f}), bbox=({chain_bbox[0]:.1f},{chain_bbox[1]:.1f})-({chain_bbox[2]:.1f},{chain_bbox[3]:.1f})")
             else:
                 rejected_detour += 1
                 rejected_chains.append({
@@ -550,46 +614,50 @@ class ArcReconstructor:
                     'detour_index': detour_index,
                     'metrics': None
                 })
-                print(
-                    f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected detour - detour_index={detour_index:.4f} (need >1.01), center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
-
-        fit_time = time.time()
-        total_time = fit_time - start_time
-
-        print(
-            f"DEBUG ArcReconstructor: Rejected {rejected_detour} chains (detour), {rejected_fit} chains (fit) (fitting took {fit_time - chain_time:.3f}s)")
-
-        if fit_rejection_details:
-            print(f"\nDEBUG ArcReconstructor: Fit rejection summary:")
-            rejection_reasons = {}
-            for _, _, reason, _, _, _ in fit_rejection_details:
-                reason_type = reason.split('(')[0] if '(' in reason else reason
-                rejection_reasons[reason_type] = rejection_reasons.get(
-                    reason_type, 0) + 1
-            for reason, count in sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True):
-                print(f"  {reason}: {count} chains")
-
-            print(f"\nDEBUG ArcReconstructor: Detailed rejection info (first 20 chains):")
-            for chain_idx, detour, reason, metrics, center, bbox in fit_rejection_details[:20]:
-                print(
-                    f"  Chain {chain_idx}: center=({center[0]:.1f}, {center[1]:.1f}), detour={detour:.4f}, reason={reason}")
-                if metrics:
-                    radius = metrics.get('radius', 'N/A')
-                    sweep = metrics.get('sweep_angle_deg', 'N/A')
-                    ratio = metrics.get('chord_radius_ratio', 'N/A')
-                    radius_str = f"{radius:.2f}" if isinstance(
-                        radius, (int, float)) else radius
-                    sweep_str = f"{sweep:.1f}°" if isinstance(
-                        sweep, (int, float)) else sweep
-                    ratio_str = f"{ratio:.2f}" if isinstance(
-                        ratio, (int, float)) else ratio
+                if self.debug:
                     print(
-                        f"    Metrics: radius={radius_str}, sweep_angle={sweep_str}, chord_radius_ratio={ratio_str}")
+                        f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected detour - detour_index={detour_index:.4f} (need >1.01), center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
 
-        print(
-            f"\nDEBUG ArcReconstructor: Final result: {len(reconstructed_arcs)} reconstructed arcs from {len(used_line_indices)} line segments")
-        print(
-            f"DEBUG ArcReconstructor: Total time taken: {total_time:.3f} seconds")
+        fit_time = time.time() if self.debug else None
+        total_time = fit_time - start_time if self.debug else None
+
+        if self.debug:
+            print(
+                f"DEBUG ArcReconstructor: Rejected {rejected_detour} chains (detour), {rejected_fit} chains (fit) (fitting took {fit_time - chain_time:.3f}s)")
+
+            if fit_rejection_details:
+                print(f"\nDEBUG ArcReconstructor: Fit rejection summary:")
+                rejection_reasons = {}
+                for _, _, reason, _, _, _ in fit_rejection_details:
+                    reason_type = reason.split(
+                        '(')[0] if '(' in reason else reason
+                    rejection_reasons[reason_type] = rejection_reasons.get(
+                        reason_type, 0) + 1
+                for reason, count in sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True):
+                    print(f"  {reason}: {count} chains")
+
+                print(
+                    f"\nDEBUG ArcReconstructor: Detailed rejection info (first 20 chains):")
+                for chain_idx, detour, reason, metrics, center, bbox in fit_rejection_details[:20]:
+                    print(
+                        f"  Chain {chain_idx}: center=({center[0]:.1f}, {center[1]:.1f}), detour={detour:.4f}, reason={reason}")
+                    if metrics:
+                        radius = metrics.get('radius', 'N/A')
+                        sweep = metrics.get('sweep_angle_deg', 'N/A')
+                        ratio = metrics.get('chord_radius_ratio', 'N/A')
+                        radius_str = f"{radius:.2f}" if isinstance(
+                            radius, (int, float)) else radius
+                        sweep_str = f"{sweep:.1f}°" if isinstance(
+                            sweep, (int, float)) else sweep
+                        ratio_str = f"{ratio:.2f}" if isinstance(
+                            ratio, (int, float)) else ratio
+                        print(
+                            f"    Metrics: radius={radius_str}, sweep_angle={sweep_str}, chord_radius_ratio={ratio_str}")
+
+            print(
+                f"\nDEBUG ArcReconstructor: Final result: {len(reconstructed_arcs)} reconstructed arcs from {len(used_line_indices)} line segments")
+            print(
+                f"DEBUG ArcReconstructor: Total time taken: {total_time:.3f} seconds")
         return reconstructed_arcs, used_line_indices, rejected_chains
 
 
@@ -725,14 +793,13 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
     if arc_indices_to_remove:
         filtered_arcs = [arc for idx, arc in enumerate(
             arcs) if idx not in arc_indices_to_remove]
-        print(
-            f"DEBUG filter_door_candidates: Filtered out {len(arc_indices_to_remove)} arcs forming circular annotation patterns")
+        # Note: debug flag not passed to this function, but we can add it if needed
         return filtered_arcs
 
     return arcs
 
 
-def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: float, page_height: float) -> Tuple[List[Dict], List[Dict]]:
+def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: float, page_height: float, debug: bool = False) -> Tuple[List[Dict], List[Dict]]:
     """
     Filter door candidates by stroke width.
 
@@ -797,8 +864,9 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
     if arc_strokes:
         arc_min_threshold = np.percentile(arc_strokes, 20)
         arc_max_threshold = np.percentile(arc_strokes, 100)
-        print(
-            f"DEBUG filter_door_candidates: Arc stroke width range: min={min(arc_strokes):.3f}, max={max(arc_strokes):.3f}, 20th={arc_min_threshold:.3f}, 100th={arc_max_threshold:.3f}")
+        if debug:
+            print(
+                f"DEBUG filter_door_candidates: Arc stroke width range: min={min(arc_strokes):.3f}, max={max(arc_strokes):.3f}, 20th={arc_min_threshold:.3f}, 100th={arc_max_threshold:.3f}")
     else:
         arc_min_threshold = arc_max_threshold = 0
 
@@ -811,14 +879,14 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
                  arc['stroke_width'] <= arc_max_threshold]
     arcs_filtered_out = len(filtered_arcs_for_percentile) - len(door_arcs)
 
-    if arcs_filtered_out > 0:
+    if debug and arcs_filtered_out > 0:
         print(
             f"DEBUG filter_door_candidates: Filtered out {arcs_filtered_out} arcs, kept {len(door_arcs)} arcs")
 
     return door_lines, door_arcs
 
 
-def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dict], page_width: float, page_height: float) -> Dict:
+def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dict], page_width: float, page_height: float, debug: bool = False) -> Dict:
     """
     Analyze geometry to find door candidates.
 
@@ -836,27 +904,33 @@ def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dic
     all_lines = lines + dashed_lines
 
     # Step 1: Reconstruct arcs from tessellated line segments
-    reconstructor = ArcReconstructor(page_width, page_height)
+    reconstructor = ArcReconstructor(page_width, page_height, debug=debug)
     reconstructed_arcs, used_line_indices, rejected_chains = reconstructor.reconstruct_arcs(
         all_lines)
 
     if reconstructed_arcs:
-        print(
-            f"DEBUG analyze_geometry: Reconstructed {len(reconstructed_arcs)} arcs from {len(used_line_indices)} tessellated segments")
+        if debug:
+            print(
+                f"DEBUG analyze_geometry: Reconstructed {len(reconstructed_arcs)} arcs from {len(used_line_indices)} tessellated segments")
         arcs = arcs + reconstructed_arcs
+        # Optimized: use set for O(1) lookup instead of O(n) list check
+        used_set = used_line_indices if isinstance(
+            used_line_indices, set) else set(used_line_indices)
         all_lines = [line for i, line in enumerate(
-            all_lines) if i not in used_line_indices]
-        print(
-            f"DEBUG analyze_geometry: Removed {len(used_line_indices)} tessellated segments from lines list")
+            all_lines) if i not in used_set]
+        if debug:
+            print(
+                f"DEBUG analyze_geometry: Removed {len(used_line_indices)} tessellated segments from lines list")
 
     # Step 2: Filter door candidates
     filtered_lines, filtered_arcs = filter_door_candidates(
-        all_lines, arcs, page_width, page_height)
+        all_lines, arcs, page_width, page_height, debug=debug)
 
-    print(
-        f"DEBUG analyze_geometry: Number of filtered lines: {len(filtered_lines)}")
-    print(
-        f"DEBUG analyze_geometry: Number of filtered arcs: {len(filtered_arcs)}")
+    if debug:
+        print(
+            f"DEBUG analyze_geometry: Number of filtered lines: {len(filtered_lines)}")
+        print(
+            f"DEBUG analyze_geometry: Number of filtered arcs: {len(filtered_arcs)}")
 
     return {
         "filtered_lines": filtered_lines,

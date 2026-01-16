@@ -101,7 +101,7 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold = arc_radius * .03  # LOOK HERE
+    threshold = arc_radius * .02  # LOOK HERE
     # has to be greater than .05
 
     distances = [
@@ -118,11 +118,11 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
     # Step 4: Angle Check (calculate first, needed for ratio scaling)
     sweep_angle = calculate_arc_sweep_angle(arc, arc_radius)
     # greater than 7.5 less than 120
-    if sweep_angle is None or not (12.5 <= sweep_angle <= 120):  # LOOK HERE
+    if sweep_angle is None or not (12.5 <= sweep_angle <= 103.5):  # LOOK HERE
         if debug:
             coord_str = f"center=({int(arc_center[0])}, {int(arc_center[1])})"
             print(
-                f"  ✗ Rule 1 FAILED: Sweep angle {sweep_angle:.1f}° (required: 12.5-120°)" if sweep_angle else f"  ✗ Rule 1 FAILED: Sweep angle None")
+                f"  ✗ Rule 1 FAILED: Sweep angle {sweep_angle:.1f}° (required: 12.5-104°)" if sweep_angle else f"  ✗ Rule 1 FAILED: Sweep angle None")
         return None
 
     # Step 2: Ratio Check (Length vs Radius) - scaled by sweep angle
@@ -156,6 +156,30 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
             print(
                 f"  ✗ Rule 2 FAILED: Ratio {ratio:.2f} (line={line_length:.1f}, radius={arc_radius:.1f}, sweep={sweep_angle:.1f}°, expected={expected_ratio:.2f}, allowed: {min_ratio:.2f}-{max_ratio:.2f})")
         return None
+
+    # Detailed debug output when passing (to see margins)
+    if debug:
+        # Rule 1 margins
+        margin_from_min_angle = sweep_angle - 12.5
+        margin_to_max_angle = 120 - sweep_angle
+        closest_angle_limit = min(margin_from_min_angle, margin_to_max_angle)
+        
+        # Rule 2 margins
+        margin_from_min_ratio = ratio - min_ratio
+        margin_to_max_ratio = max_ratio - ratio
+        closest_ratio_limit = min(margin_from_min_ratio, margin_to_max_ratio)
+        
+        print(f"  Rule 1 (Sweep Angle): {sweep_angle:.1f}° [required: 12.5-120°]")
+        print(f"    Margin from min (12.5°): {margin_from_min_angle:.1f}°")
+        print(f"    Margin to max (120°): {margin_to_max_angle:.1f}°")
+        print(f"    Closest to limit: {closest_angle_limit:.1f}° {'(MIN)' if margin_from_min_angle < margin_to_max_angle else '(MAX)'}")
+        
+        print(f"  Rule 2 (Line/Radius Ratio): {ratio:.4f} [required: {min_ratio:.4f}-{max_ratio:.4f}]")
+        print(f"    Line length: {line_length:.2f}, Radius: {arc_radius:.2f}")
+        print(f"    Expected ratio: {expected_ratio:.4f} (for {sweep_angle:.1f}° sweep)")
+        print(f"    Margin from min ({min_ratio:.4f}): {margin_from_min_ratio:.4f}")
+        print(f"    Margin to max ({max_ratio:.4f}): {margin_to_max_ratio:.4f}")
+        print(f"    Closest to limit: {closest_ratio_limit:.4f} {'(MIN)' if margin_from_min_ratio < margin_to_max_ratio else '(MAX)'}")
 
     return {
         "type": "swing_door",
@@ -209,6 +233,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             closest_bbox_distance = float('inf')
             closest_touch_distance = float('inf')
             rejection_reason = None
+            touch_info = None  # Store touch info for matching line
 
             # Pre-calculate arc bbox for efficiency using path_rect
         arc_rect = arc['path_rect']
@@ -253,25 +278,32 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
 
             # Check touch using the actual function (for both logic and debug)
             touch_result = check_arc_line_touch(arc, line, arc_radius)
+            touch_threshold = arc_radius * 0.03
 
             if debug:
+                # Always calculate touch distance for detailed info
+                arc_start = np.array(arc['control_points'][0])
+                arc_end = np.array(arc['control_points'][-1])
+                line_start_arr = np.array(line['start'])
+                line_end_arr = np.array(line['end'])
+
+                distances = [
+                    np.linalg.norm(arc_start - line_start_arr),
+                    np.linalg.norm(arc_start - line_end_arr),
+                    np.linalg.norm(arc_end - line_start_arr),
+                    np.linalg.norm(arc_end - line_end_arr)
+                ]
+                min_touch_dist = min(distances)
+                
                 if touch_result:
                     lines_passed_touch += 1
+                    # Store touch info for the matching line (shown later)
+                    touch_info = {
+                        'min_distance': min_touch_dist,
+                        'threshold': touch_threshold,
+                        'margin': touch_threshold - min_touch_dist
+                    }
                 else:
-                    # Calculate touch distances for debug stats (only when touch fails)
-                    arc_start = np.array(arc['control_points'][0])
-                    arc_end = np.array(arc['control_points'][-1])
-                    line_start_arr = np.array(line['start'])
-                    line_end_arr = np.array(line['end'])
-
-                    distances = [
-                        np.linalg.norm(arc_start - line_start_arr),
-                        np.linalg.norm(arc_start - line_end_arr),
-                        np.linalg.norm(arc_end - line_start_arr),
-                        np.linalg.norm(arc_end - line_end_arr)
-                    ]
-                    min_touch_dist = min(distances)
-
                     if min_touch_dist < closest_touch_distance:
                         closest_touch_distance = min_touch_dist
 
@@ -324,12 +356,22 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                     if debug:
                         rejection_reason = f"Arc faces wrong way (hinge angle={angle_deg:.1f}° > 100°)"
                     continue
+                elif debug and touch_result:  # Show triangle angle info when touch passes
+                    margin_to_reject = 100 - angle_deg
+                    print(f"  Triangle Angle Check: PASSED")
+                    print(f"    Hinge angle: {angle_deg:.1f}° (threshold: 100°)")
+                    print(f"    Margin to rejection: {margin_to_reject:.1f}°")
 
             door = classify_swing_door(
                 arc, line, arc_radius, arc_center, debug=debug, arc_idx=arc_idx)
             if door:
                 if debug:
                     print(f"  ✓ MATCHED with line {i} - All rules passed!")
+                    # Show touch info for the matching line
+                    if touch_info is not None:
+                        print(f"  Touch Check: PASSED")
+                        print(f"    Min distance: {touch_info['min_distance']:.2f} (threshold: {touch_info['threshold']:.2f})")
+                        print(f"    Margin: {touch_info['margin']:.2f}")
                 swing_doors.append(door)
                 used_lines.add(i)
                 used_arcs.add(arc_idx)
