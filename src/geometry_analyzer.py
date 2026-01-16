@@ -468,13 +468,14 @@ class ArcReconstructor:
             sweep_angle_deg = np.degrees(sweep_angle)
             metrics['sweep_angle_deg'] = sweep_angle_deg
 
-            # Ensure arc is open (not closed) - stricter range
+            # Ensure arc is open (not closed) - allow up to 210° for double door detection
             if sweep_angle_deg >= 360:
                 return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° >= 360°)", metrics
             if sweep_angle_deg < 12:
                 return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° < 12°, margin={sweep_angle_deg - 12:.1f}°)", metrics
-            if sweep_angle_deg > 120:
-                return None, f"sweep_angle_too_large({sweep_angle_deg:.1f}° > 120°, margin={sweep_angle_deg - 120:.1f}°)", metrics
+            # Allow arcs up to 210° for double door detection (150-210° range)
+            if sweep_angle_deg > 210:
+                return None, f"sweep_angle_too_large({sweep_angle_deg:.1f}° > 210°, margin={sweep_angle_deg - 210:.1f}°)", metrics
 
             chord_length = np.linalg.norm(p_end - p0)
             if chord_length < 1e-1:
@@ -966,10 +967,44 @@ def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dic
         print(
             f"DEBUG analyze_geometry: Number of filtered arcs: {len(filtered_arcs)}")
 
+    # Step 3: Separate arcs for swing doors (< 120°) and double doors (150-210°)
+    swing_door_arcs = []
+    double_door_candidates = []
+
+    for arc in filtered_arcs:
+        sweep_angle = arc.get('sweep_angle')
+        if sweep_angle is not None:
+            if 150 <= sweep_angle <= 210:
+                double_door_candidates.append(arc)
+            elif sweep_angle < 120:  # Only include arcs < 120° for swing doors
+                swing_door_arcs.append(arc)
+        else:
+            # If no sweep_angle, include in swing door arcs (will be filtered later)
+            swing_door_arcs.append(arc)
+
+    # Remove double door candidates from filtered_arcs so they're only drawn once (in BLUE, not RED)
+    # Create a set of double door candidate IDs for efficient lookup
+    double_door_ids = {id(arc) for arc in double_door_candidates}
+    filtered_arcs_without_double_doors = [
+        arc for arc in filtered_arcs if id(arc) not in double_door_ids]
+
+    if debug:
+        print(f"DEBUG analyze_geometry: Arc separation:")
+        print(f"  Arcs < 120°: {len(swing_door_arcs)} (swing door candidates)")
+        print(
+            f"  Arcs 150-210°: {len(double_door_candidates)} (double door candidates)")
+        if double_door_candidates:
+            sweep_angles = [arc.get('sweep_angle')
+                            for arc in double_door_candidates]
+            print(
+                f"  Double door candidate sweep angles: {[f'{s:.1f}°' for s in sweep_angles]}")
+
     return {
         "filtered_lines": filtered_lines,
-        "filtered_arcs": filtered_arcs,
-        "door_candidate_arcs": filtered_arcs,  # Use filtered arcs directly
+        # Exclude double door candidates (they're drawn separately in BLUE)
+        "filtered_arcs": filtered_arcs_without_double_doors,
+        "door_candidate_arcs": swing_door_arcs,  # Only arcs < 120° for swing doors
         "dashed_lines": dashed_lines,
-        "rejected_chains": rejected_chains  # For visualization
+        "rejected_chains": rejected_chains,  # For visualization
+        "double_door_candidates": double_door_candidates
     }
