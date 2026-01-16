@@ -65,7 +65,7 @@ class ArcReconstructor:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
         self.segment_max_threshold = page_diagonal * 0.003
         self.segment_min_threshold = page_diagonal * 0.00035
-        self.gap_tolerance = page_diagonal * 0.00105
+        self.gap_tolerance = page_diagonal * 0.001
 
     def _is_short_segment(self, line: Dict) -> bool:
         """Check if line is short enough to be a tessellated segment (but not too small - dust)."""
@@ -284,12 +284,17 @@ class ArcReconstructor:
 
                 # Safety fallback: if spatial index finds very few candidates and we haven't used fallback yet,
                 # check all remaining segments once to ensure we don't miss connections
-                # This is a lenient fallback that only triggers when spatial index seems insufficient
-                if not fallback_used and len(candidates) < 5 and len(chain) < 15:
+                # More lenient: trigger fallback more easily for better completeness
+                if not fallback_used and len(candidates) < 10 and len(chain) < 20:
                     # Fallback: check all unused segments (slower but ensures completeness)
                     candidates = set(range(len(segments))) - used
                     fallback_used = True  # Only use fallback once per chain to balance speed/accuracy
 
+                # Collect valid segments to add (check all candidates first, then add them)
+                # This is less greedy - finds multiple connections per iteration
+                segments_to_add_end = []
+                segments_to_add_start = []
+                
                 for j in candidates:
                     if j in used or j >= len(segments):
                         continue
@@ -301,23 +306,32 @@ class ArcReconstructor:
                     connects_to_start = self._are_connected(
                         chain[0][1], other_seg)
 
-                    # Check if segment continues smoothly before adding
+                    # Collect valid segments to add (check all candidates first, then add them)
                     if connects_to_end:
-                        if self._would_reverse_curve(chain, other_seg, add_to_end=True):
-                            continue
-                        if self._continues_smoothly(chain, other_seg, add_to_end=True):
-                            chain.append((other_orig_idx, other_seg))
-                            used.add(j)
-                            changed = True
-                            break
+                        if not self._would_reverse_curve(chain, other_seg, add_to_end=True):
+                            if self._continues_smoothly(chain, other_seg, add_to_end=True):
+                                segments_to_add_end.append((j, other_orig_idx, other_seg))
                     elif connects_to_start:
-                        if self._would_reverse_curve(chain, other_seg, add_to_end=False):
-                            continue
-                        if self._continues_smoothly(chain, other_seg, add_to_end=False):
-                            chain.insert(0, (other_orig_idx, other_seg))
-                            used.add(j)
-                            changed = True
-                            break
+                        if not self._would_reverse_curve(chain, other_seg, add_to_end=False):
+                            if self._continues_smoothly(chain, other_seg, add_to_end=False):
+                                segments_to_add_start.append((j, other_orig_idx, other_seg))
+                
+                # Add segments to end (in order found)
+                for j, other_orig_idx, other_seg in segments_to_add_end:
+                    if j not in used:  # Double-check in case of duplicates
+                        chain.append((other_orig_idx, other_seg))
+                        used.add(j)
+                        changed = True
+                
+                # Add segments to start (in reverse order to maintain chain order)
+                for j, other_orig_idx, other_seg in reversed(segments_to_add_start):
+                    if j not in used:  # Double-check in case of duplicates
+                        chain.insert(0, (other_orig_idx, other_seg))
+                        used.add(j)
+                        changed = True
+                
+                # Break and restart while loop with updated chain endpoints
+                # This allows the algorithm to find connections from the newly added segments
 
             if len(chain) >= 3:
                 chains.append(chain)
