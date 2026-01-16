@@ -35,6 +35,42 @@ def calculate_arc_sweep_angle(arc: Dict, radius: float) -> Optional[float]:
     return np.degrees(angle_radians)
 
 
+def _get_bbox_from_rect(rect) -> tuple:
+    """Extract bbox from rect (handles both PyMuPDF Rect and tuple/list)."""
+    if isinstance(rect, (list, tuple)) and len(rect) >= 4:
+        return rect
+    elif hasattr(rect, 'x0'):
+        return (rect.x0, rect.y0, rect.x1, rect.y1)
+    return None
+
+
+def _get_door_bbox(door: Dict) -> tuple:
+    """Get combined bbox for a door (arc + line)."""
+    arc = door['arc']
+    line = door['line']
+    
+    # Get arc bbox
+    arc_rect = arc.get('path_rect')
+    if arc_rect:
+        arc_bbox = _get_bbox_from_rect(arc_rect)
+    else:
+        cp = arc['control_points']
+        arc_bbox = (min(p[0] for p in cp), min(p[1] for p in cp),
+                   max(p[0] for p in cp), max(p[1] for p in cp))
+    
+    # Get line bbox
+    line_rect = line.get('path_rect')
+    if line_rect:
+        line_bbox = _get_bbox_from_rect(line_rect)
+    else:
+        s, e = line['start'], line['end']
+        line_bbox = (min(s[0], e[0]), min(s[1], e[1]), max(s[0], e[0]), max(s[1], e[1]))
+    
+    # Combined bbox
+    return (min(arc_bbox[0], line_bbox[0]), min(arc_bbox[1], line_bbox[1]),
+            max(arc_bbox[2], line_bbox[2]), max(arc_bbox[3], line_bbox[3]))
+
+
 def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     """
     Check if arc and line touch at one endpoint.
@@ -320,48 +356,15 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
     double_doors = []
     if page_width is not None and page_height is not None and len(swing_doors) > 1:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
-        buffer = page_diagonal * 0.001  # Small buffer for overlap detection
+        buffer = page_diagonal * 0.001
         
-        # Calculate bbox for each door (combine arc and line)
+        # Calculate bbox for each door
         door_bboxes = []
         for door in swing_doors:
-            arc = door['arc']
-            line = door['line']
-            
-            # Get arc bbox
-            arc_rect = arc.get('path_rect')
-            if arc_rect:
-                if isinstance(arc_rect, (list, tuple)) and len(arc_rect) >= 4:
-                    arc_bbox = arc_rect
-                else:
-                    arc_bbox = (arc_rect.x0, arc_rect.y0, arc_rect.x1, arc_rect.y1)
-            else:
-                # Fallback: calculate from control points
-                cp = arc['control_points']
-                arc_bbox = (min(p[0] for p in cp), min(p[1] for p in cp),
-                           max(p[0] for p in cp), max(p[1] for p in cp))
-            
-            # Get line bbox
-            line_rect = line.get('path_rect')
-            if line_rect:
-                if isinstance(line_rect, (list, tuple)) and len(line_rect) >= 4:
-                    line_bbox = line_rect
-                else:
-                    line_bbox = (line_rect.x0, line_rect.y0, line_rect.x1, line_rect.y1)
-            else:
-                # Fallback: calculate from start/end
-                s, e = line['start'], line['end']
-                line_bbox = (min(s[0], e[0]), min(s[1], e[1]), max(s[0], e[0]), max(s[1], e[1]))
-            
-            # Combined bbox with buffer
-            min_x = min(arc_bbox[0], line_bbox[0]) - buffer
-            min_y = min(arc_bbox[1], line_bbox[1]) - buffer
-            max_x = max(arc_bbox[2], line_bbox[2]) + buffer
-            max_y = max(arc_bbox[3], line_bbox[3]) + buffer
-            
-            door_bboxes.append((min_x, min_y, max_x, max_y))
+            bbox = _get_door_bbox(door)
+            door_bboxes.append((bbox[0] - buffer, bbox[1] - buffer, bbox[2] + buffer, bbox[3] + buffer))
         
-        # Find overlapping pairs (efficient: only check each pair once)
+        # Find overlapping pairs
         used_indices = set()
         for i in range(len(swing_doors)):
             if i in used_indices:
@@ -377,13 +380,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 # Check overlap
                 if (bbox1[0] <= bbox2[2] and bbox2[0] <= bbox1[2] and
                     bbox1[1] <= bbox2[3] and bbox2[1] <= bbox1[3]):
-                    # Found overlapping pair - create single double door with combined bbox
-                    door1 = swing_doors[i]
-                    door2 = swing_doors[j]
-                    
-                    # Calculate combined bbox
-                    bbox1 = door_bboxes[i]
-                    bbox2 = door_bboxes[j]
+                    # Create double door with combined bbox
                     combined_bbox = (
                         min(bbox1[0], bbox2[0]),
                         min(bbox1[1], bbox2[1]),
@@ -393,20 +390,13 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                     
                     double_doors.append({
                         'type': 'double_door',
-                        'arc': door1['arc'],  # Use first door's arc (or could combine)
-                        'line': door1['line'],  # Use first door's line (or could combine)
-                        'arc_radius': max(door1.get('arc_radius', 0), door2.get('arc_radius', 0)),
-                        'sweep_angle': max(door1.get('sweep_angle', 0), door2.get('sweep_angle', 0)),
-                        'center': door1.get('center'),  # Use first door's center
-                        'bbox': combined_bbox,
-                        'door1': door1,  # Keep references for debugging if needed
-                        'door2': door2
+                        'bbox': combined_bbox
                     })
                     used_indices.add(i)
                     used_indices.add(j)
-                    break  # One pair per door
+                    break
         
-        # Remove double doors from swing doors list
+        # Remove double doors from swing doors
         swing_doors = [door for idx, door in enumerate(swing_doors) if idx not in used_indices]
         
         if debug and double_doors:

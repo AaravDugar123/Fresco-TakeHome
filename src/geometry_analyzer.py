@@ -75,34 +75,23 @@ class ArcReconstructor:
         length = (dx*dx + dy*dy) ** 0.5
         return self.segment_min_threshold <= length < self.segment_max_threshold
 
+    def _squared_distance(self, p1: tuple, p2: tuple) -> float:
+        """Calculate squared distance between two points (avoids sqrt for speed)."""
+        dx, dy = p1[0] - p2[0], p1[1] - p2[1]
+        return dx*dx + dy*dy
+
     def _are_connected(self, line1: Dict, line2: Dict) -> bool:
         """Check if two lines are connected within tolerance."""
-        end1 = line1['end']
-        start1 = line1['start']
-        start2 = line2['start']
-        end2 = line2['end']
-
         threshold_sq = self.gap_tolerance * self.gap_tolerance
-
-        # Check all 4 endpoint combinations with squared distances (avoid sqrt)
-        dx = end1[0] - start2[0]
-        dy = end1[1] - start2[1]
-        if dx*dx + dy*dy <= threshold_sq:
-            return True
-
-        dx = end1[0] - end2[0]
-        dy = end1[1] - end2[1]
-        if dx*dx + dy*dy <= threshold_sq:
-            return True
-
-        dx = start1[0] - start2[0]
-        dy = start1[1] - start2[1]
-        if dx*dx + dy*dy <= threshold_sq:
-            return True
-
-        dx = start1[0] - end2[0]
-        dy = start1[1] - end2[1]
-        return dx*dx + dy*dy <= threshold_sq
+        endpoints1 = [line1['start'], line1['end']]
+        endpoints2 = [line2['start'], line2['end']]
+        
+        # Check all 4 endpoint combinations
+        for p1 in endpoints1:
+            for p2 in endpoints2:
+                if self._squared_distance(p1, p2) <= threshold_sq:
+                    return True
+        return False
 
     def _continues_smoothly(self, chain: List[Tuple[int, Dict]], new_segment: Dict, add_to_end: bool) -> bool:
         """
@@ -179,6 +168,43 @@ class ArcReconstructor:
         # Reject sharp turns (>40 degrees) which indicate intersecting lines
         return angle_deg <= 40.0
 
+    def _would_reverse_curve(self, chain: List[Tuple[int, Dict]], new_segment: Dict, add_to_end: bool) -> bool:
+        """Check if adding new_segment would significantly reverse curve direction (>100°)."""
+        if len(chain) < 2:
+            return False
+        
+        if add_to_end:
+            last_seg = chain[-1][1]
+            prev_seg = chain[-2][1]
+            last_dir = np.array(last_seg['end']) - np.array(last_seg['start'])
+            prev_dir = np.array(prev_seg['end']) - np.array(prev_seg['start'])
+            curve_dir = last_dir + prev_dir
+            connect_pt = np.array(last_seg['end'])
+        else:
+            first_seg = chain[0][1]
+            second_seg = chain[1][1]
+            first_dir = np.array(first_seg['end']) - np.array(first_seg['start'])
+            second_dir = np.array(second_seg['end']) - np.array(second_seg['start'])
+            curve_dir = first_dir + second_dir
+            connect_pt = np.array(first_seg['start'])
+        
+        new_s, new_e = np.array(new_segment['start']), np.array(new_segment['end'])
+        dist_s = np.linalg.norm(connect_pt - new_s)
+        dist_e = np.linalg.norm(connect_pt - new_e)
+        
+        if add_to_end:
+            new_dir = (new_e - connect_pt) if dist_s <= dist_e else (new_s - connect_pt)
+        else:
+            new_dir = (connect_pt - new_e) if dist_s <= dist_e else (connect_pt - new_s)
+        
+        curve_norm, new_norm = np.linalg.norm(curve_dir), np.linalg.norm(new_dir)
+        if curve_norm <= 1e-5 or new_norm <= 1e-5:
+            return False
+        
+        dot = np.dot(curve_dir / curve_norm, new_dir / new_norm)
+        angle = np.degrees(np.arccos(np.clip(dot, -1.0, 1.0)))
+        return angle > 100
+
     def _chain_segments(self, segments: List[Tuple[int, Dict]]) -> List[List[Tuple[int, Dict]]]:
         """Group connected segments into chains, avoiding intersecting lines."""
         if not segments:
@@ -208,70 +234,16 @@ class ArcReconstructor:
 
                     # Check if segment continues smoothly before adding
                     if connects_to_end:
-                        # Simple check: if segment reverses curve direction significantly (>100°), start new chain
-                        if len(chain) >= 2:
-                            last_seg = chain[-1][1]
-                            prev_seg = chain[-2][1]
-                            last_dir = np.array(
-                                last_seg['end']) - np.array(last_seg['start'])
-                            prev_dir = np.array(
-                                prev_seg['end']) - np.array(prev_seg['start'])
-                            curve_dir = last_dir + prev_dir  # Overall curve direction
-
-                            new_s, new_e = np.array(
-                                other_seg['start']), np.array(other_seg['end'])
-                            connect_pt = np.array(last_seg['end'])
-                            dist_s = np.linalg.norm(connect_pt - new_s)
-                            dist_e = np.linalg.norm(connect_pt - new_e)
-                            new_dir = (
-                                new_e - connect_pt) if dist_s <= dist_e else (new_s - connect_pt)
-
-                            curve_norm, new_norm = np.linalg.norm(
-                                curve_dir), np.linalg.norm(new_dir)
-                            if curve_norm > 1e-5 and new_norm > 1e-5:
-                                dot = np.dot(curve_dir / curve_norm,
-                                             new_dir / new_norm)
-                                angle = np.degrees(
-                                    np.arccos(np.clip(dot, -1.0, 1.0)))
-                                # Significant reversal - don't merge (double door)
-                                if angle > 100:
-                                    continue
-
+                        if self._would_reverse_curve(chain, other_seg, add_to_end=True):
+                            continue
                         if self._continues_smoothly(chain, other_seg, add_to_end=True):
                             chain.append((other_orig_idx, other_seg))
                             used.add(j)
                             changed = True
                             break
                     elif connects_to_start:
-                        # Simple check: if segment reverses curve direction significantly (>100°), start new chain
-                        if len(chain) >= 2:
-                            first_seg = chain[0][1]
-                            second_seg = chain[1][1]
-                            first_dir = np.array(
-                                first_seg['end']) - np.array(first_seg['start'])
-                            second_dir = np.array(
-                                second_seg['end']) - np.array(second_seg['start'])
-                            curve_dir = first_dir + second_dir  # Overall curve direction
-
-                            new_s, new_e = np.array(
-                                other_seg['start']), np.array(other_seg['end'])
-                            connect_pt = np.array(first_seg['start'])
-                            dist_s = np.linalg.norm(connect_pt - new_s)
-                            dist_e = np.linalg.norm(connect_pt - new_e)
-                            new_dir = (
-                                connect_pt - new_e) if dist_s <= dist_e else (connect_pt - new_s)
-
-                            curve_norm, new_norm = np.linalg.norm(
-                                curve_dir), np.linalg.norm(new_dir)
-                            if curve_norm > 1e-5 and new_norm > 1e-5:
-                                dot = np.dot(curve_dir / curve_norm,
-                                             new_dir / new_norm)
-                                angle = np.degrees(
-                                    np.arccos(np.clip(dot, -1.0, 1.0)))
-                                # Significant reversal - don't merge (double door)
-                                if angle > 100:
-                                    continue
-
+                        if self._would_reverse_curve(chain, other_seg, add_to_end=False):
+                            continue
                         if self._continues_smoothly(chain, other_seg, add_to_end=False):
                             chain.insert(0, (other_orig_idx, other_seg))
                             used.add(j)
@@ -283,11 +255,8 @@ class ArcReconstructor:
 
         return chains
 
-    def _calculate_detour_index(self, chain: List[Tuple[int, Dict]]) -> float:
-        """Calculate detour index: Total Path Length / Straight Distance."""
-        if len(chain) < 2:
-            return 1.0
-
+    def _collect_chain_points(self, chain: List[Tuple[int, Dict]]) -> List[np.ndarray]:
+        """Collect ordered points from a chain of segments."""
         points = []
         current_point = None
 
@@ -300,8 +269,9 @@ class ArcReconstructor:
                 points.append(end)
                 current_point = end
             else:
-                dist_to_start = np.linalg.norm(start - current_point)
-                dist_to_end = np.linalg.norm(end - current_point)
+                current_arr = np.array(current_point)
+                dist_to_start = np.linalg.norm(start - current_arr)
+                dist_to_end = np.linalg.norm(end - current_arr)
 
                 if dist_to_start <= dist_to_end and dist_to_start <= self.gap_tolerance:
                     points.append(end)
@@ -314,18 +284,21 @@ class ArcReconstructor:
                     points.append(end)
                     current_point = end
 
+        return points
+
+    def _calculate_detour_index(self, chain: List[Tuple[int, Dict]]) -> float:
+        """Calculate detour index: Total Path Length / Straight Distance."""
+        if len(chain) < 2:
+            return 1.0
+
+        points = self._collect_chain_points(chain)
         if len(points) < 2:
             return 1.0
 
-        total_length = 0.0
-        for i in range(len(points) - 1):
-            total_length += np.linalg.norm(points[i+1] - points[i])
-
+        total_length = sum(np.linalg.norm(points[i+1] - points[i]) for i in range(len(points) - 1))
         straight_distance = np.linalg.norm(points[-1] - points[0])
-        if straight_distance < 1e-5:
-            return 1.0
-
-        return total_length / straight_distance
+        
+        return total_length / straight_distance if straight_distance >= 1e-5 else 1.0
 
     def _fit_circle(self, chain: List[Tuple[int, Dict]]) -> Tuple[Optional[Dict], Optional[str], Optional[Dict]]:
         """Fit circle to chain of segments using geometric circle fitting.
@@ -333,34 +306,7 @@ class ArcReconstructor:
         - arc_dict is the arc on success, None on failure
         - diagnostic_string is None on success, or contains the rejection reason on failure
         - metrics_dict contains computed values (radius, sweep_angle, etc.) for debugging"""
-        points = []
-        current_point = None
-
-        for orig_idx, line in chain:
-            start = line['start']
-            end = line['end']
-            start_arr = np.array(start)
-            end_arr = np.array(end)
-
-            if len(points) == 0:
-                points.append(start_arr)
-                points.append(end_arr)
-                current_point = end
-            else:
-                current_arr = np.array(current_point)
-                dist_to_start = np.linalg.norm(start_arr - current_arr)
-                dist_to_end = np.linalg.norm(end_arr - current_arr)
-
-                if dist_to_start <= dist_to_end and dist_to_start <= self.gap_tolerance:
-                    points.append(end_arr)
-                    current_point = end
-                elif dist_to_end <= self.gap_tolerance:
-                    points.append(start_arr)
-                    current_point = start
-                else:
-                    points.append(start_arr)
-                    points.append(end_arr)
-                    current_point = end
+        points = self._collect_chain_points(chain)
 
         if len(points) < 3:
             return None, f"insufficient_points({len(points)})", None
@@ -393,12 +339,11 @@ class ArcReconstructor:
                 dist = np.abs(np.linalg.norm(p - center) - radius)
                 max_error = max(max_error, dist)
 
-            # Store metrics for debugging
-            metrics = {'radius': radius, 'max_error': max_error,
-                       'error_threshold': radius * .8}
+            error_threshold = radius * 0.8
+            metrics = {'radius': radius, 'max_error': max_error, 'error_threshold': error_threshold}
 
-            if max_error > radius * .8:
-                return None, f"max_error_too_high({max_error:.2f} > {radius * .8:.2f}, radius={radius:.2f}, margin={max_error - radius * 0.8:.2f})", metrics
+            if max_error > error_threshold:
+                return None, f"max_error_too_high({max_error:.2f} > {error_threshold:.2f}, radius={radius:.2f}, margin={max_error - error_threshold:.2f})", metrics
 
             start_vec = p0 - center
             end_vec = p_end - center
@@ -417,43 +362,43 @@ class ArcReconstructor:
 
             sweep_angle = abs(diff)
             sweep_angle_deg = np.degrees(sweep_angle)
-
-            # Update metrics
             metrics['sweep_angle_deg'] = sweep_angle_deg
 
             # Ensure arc is open (not closed) - stricter range
-            if sweep_angle_deg >= 360 or sweep_angle_deg < 12:
-                if sweep_angle_deg < 12:
-                    margin = sweep_angle_deg - 12
-                    return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° < 12°, margin={margin:.1f}°)", metrics
-                else:
-                    return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° >= 360°)", metrics
+            if sweep_angle_deg >= 360:
+                return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° >= 360°)", metrics
+            if sweep_angle_deg < 12:
+                return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° < 12°, margin={sweep_angle_deg - 12:.1f}°)", metrics
             if sweep_angle_deg > 120:
-                return None, f"sweep_angle_too_large({sweep_angle_deg:.1f}° > 150°, margin={sweep_angle_deg - 150:.1f}°)", metrics
+                return None, f"sweep_angle_too_large({sweep_angle_deg:.1f}° > 120°, margin={sweep_angle_deg - 120:.1f}°)", metrics
 
             chord_length = np.linalg.norm(p_end - p0)
             if chord_length < 1e-1:
                 return None, "chord_length_too_small", metrics
 
             arc_length = radius * sweep_angle
-            metrics['chord_length'] = chord_length
-            metrics['arc_length'] = arc_length
-            metrics['arc_chord_ratio'] = arc_length / \
-                chord_length if chord_length > 0 else 0
+            arc_chord_ratio = arc_length / chord_length if chord_length > 0 else 0
+            metrics.update({
+                'chord_length': chord_length,
+                'arc_length': arc_length,
+                'arc_chord_ratio': arc_chord_ratio
+            })
 
             if arc_length <= chord_length * 1.01:
-                return None, f"arc_too_flat(arc={arc_length:.2f}, chord={chord_length:.2f}, ratio={arc_length/chord_length:.4f}, need >1.005, margin={arc_length/chord_length - 1.005:.4f})", metrics
+                return None, f"arc_too_flat(arc={arc_length:.2f}, chord={chord_length:.2f}, ratio={arc_chord_ratio:.4f}, need >1.01, margin={arc_chord_ratio - 1.01:.4f})", metrics
 
             page_diagonal = np.sqrt(self.page_width**2 + self.page_height**2)
-            min_radius = page_diagonal * 0.0015  # Stricter: increased from 0.00125
-            max_radius = page_diagonal * 0.1  # Stricter: reduced from 0.15
-            metrics['page_diagonal'] = page_diagonal
-            metrics['min_radius'] = min_radius
-            metrics['max_radius'] = max_radius
+            min_radius = page_diagonal * 0.0015
+            max_radius = page_diagonal * 0.1
+            metrics.update({
+                'page_diagonal': page_diagonal,
+                'min_radius': min_radius,
+                'max_radius': max_radius
+            })
 
             if radius < min_radius or radius > max_radius:
                 margin = min_radius - radius if radius < min_radius else radius - max_radius
-                return None, f"radius_out_of_range({radius:.2f}, valid: {min_radius:.2f}-{max_radius:.2f}, page_diag={page_diagonal:.2f}, margin={margin:.2f})", metrics
+                return None, f"radius_out_of_range({radius:.2f}, valid: {min_radius:.2f}-{max_radius:.2f}, margin={margin:.2f})", metrics
 
             chord_radius_ratio = chord_length / radius if radius > 0 else 0
             metrics['chord_radius_ratio'] = chord_radius_ratio
@@ -490,15 +435,8 @@ class ArcReconstructor:
             all_control_points = [p0, p1, p2, p_end]
             all_x = [p[0] for p in all_control_points]
             all_y = [p[1] for p in all_control_points]
-            path_rect = (float(min(all_x)), float(min(all_y)),
-                         float(max(all_x)), float(max(all_y)))
-
-            control_points_list = [
-                [float(p0[0]), float(p0[1])],
-                [float(p1[0]), float(p1[1])],
-                [float(p2[0]), float(p2[1])],
-                [float(p_end[0]), float(p_end[1])]
-            ]
+            path_rect = (float(min(all_x)), float(min(all_y)), float(max(all_x)), float(max(all_y)))
+            control_points_list = [[float(p[0]), float(p[1])] for p in all_control_points]
 
             return {
                 'type': 'cubic_bezier',
@@ -550,16 +488,19 @@ class ArcReconstructor:
         fit_rejection_details = []
         rejected_chains = []  # For visualization
 
-        for chain_idx, chain in enumerate(chains):
-            # Calculate chain bounding box for location identification
+        def _get_chain_bbox_and_center(chain):
+            """Calculate chain bounding box and center."""
             all_x = []
             all_y = []
             for orig_idx, line in chain:
                 all_x.extend([line['start'][0], line['end'][0]])
                 all_y.extend([line['start'][1], line['end'][1]])
-            chain_bbox = (min(all_x), min(all_y), max(all_x), max(all_y))
-            chain_center = ((min(all_x) + max(all_x)) / 2,
-                            (min(all_y) + max(all_y)) / 2)
+            bbox = (min(all_x), min(all_y), max(all_x), max(all_y))
+            center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+            return bbox, center
+
+        for chain_idx, chain in enumerate(chains):
+            chain_bbox, chain_center = _get_chain_bbox_and_center(chain)
 
             detour_index = self._calculate_detour_index(chain)
             if detour_index > 1.01:  # Stricter: increased from 1.01
@@ -584,36 +525,6 @@ class ArcReconstructor:
                     })
                     print(
                         f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected fit - detour={detour_index:.4f}, reason={diagnostic}, center=({chain_center[0]:.1f}, {chain_center[1]:.1f}), bbox=({chain_bbox[0]:.1f},{chain_bbox[1]:.1f})-({chain_bbox[2]:.1f},{chain_bbox[3]:.1f})")
-
-                    # TEMPORARY: Log detailed info for chains near target area (894.4, 1587)
-                    target_x, target_y = 894.4, 1587.0
-                    tolerance = 50.0  # Within 50 units
-                    if abs(chain_center[0] - target_x) < tolerance and abs(chain_center[1] - target_y) < tolerance:
-                        print(
-                            f"\n*** TARGET AREA REJECTION (near {target_x}, {target_y}) ***")
-                        print(
-                            f"  Chain {chain_idx}: center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
-                        print(f"  Rejection reason: {diagnostic}")
-                        print(f"  Detour index: {detour_index:.4f}")
-                        print(
-                            f"  Bbox: ({chain_bbox[0]:.1f}, {chain_bbox[1]:.1f}) to ({chain_bbox[2]:.1f}, {chain_bbox[3]:.1f})")
-                        if metrics:
-                            print(f"  Metrics:")
-                            if metrics.get('radius') is not None:
-                                print(f"    radius: {metrics['radius']:.2f}")
-                            if metrics.get('sweep_angle_deg') is not None:
-                                print(
-                                    f"    sweep_angle: {metrics['sweep_angle_deg']:.1f}°")
-                            if metrics.get('chord_radius_ratio') is not None:
-                                print(
-                                    f"    chord_radius_ratio: {metrics['chord_radius_ratio']:.2f}")
-                            if metrics.get('error_threshold') is not None:
-                                print(
-                                    f"    error_threshold: {metrics['error_threshold']:.2f}")
-                            if metrics.get('max_error') is not None:
-                                print(
-                                    f"    max_error: {metrics['max_error']:.2f}")
-                        print(f"*** END TARGET AREA REJECTION ***\n")
             else:
                 rejected_detour += 1
                 rejected_chains.append({
@@ -625,22 +536,7 @@ class ArcReconstructor:
                     'metrics': None
                 })
                 print(
-                    f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected detour - detour_index={detour_index:.4f} (need >1.015), center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
-
-                # TEMPORARY: Log detailed info for chains near target area (894.4, 1587)
-                target_x, target_y = 894.4, 1587.0
-                tolerance = 50.0  # Within 50 units
-                if abs(chain_center[0] - target_x) < tolerance and abs(chain_center[1] - target_y) < tolerance:
-                    print(
-                        f"\n*** TARGET AREA REJECTION (near {target_x}, {target_y}) ***")
-                    print(
-                        f"  Chain {chain_idx}: center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
-                    print(
-                        f"  Rejection reason: detour_too_low (detour_index={detour_index:.4f} <= 1.015)")
-                    print(f"  Detour index: {detour_index:.4f}")
-                    print(
-                        f"  Bbox: ({chain_bbox[0]:.1f}, {chain_bbox[1]:.1f}) to ({chain_bbox[2]:.1f}, {chain_bbox[3]:.1f})")
-                    print(f"*** END TARGET AREA REJECTION ***\n")
+                    f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected detour - detour_index={detour_index:.4f} (need >1.01), center=({chain_center[0]:.1f}, {chain_center[1]:.1f})")
 
         fit_time = time.time()
         total_time = fit_time - start_time
@@ -651,29 +547,23 @@ class ArcReconstructor:
         if fit_rejection_details:
             print(f"\nDEBUG ArcReconstructor: Fit rejection summary:")
             rejection_reasons = {}
-            for chain_idx, detour, reason, metrics, center, bbox in fit_rejection_details:
+            for _, _, reason, _, _, _ in fit_rejection_details:
                 reason_type = reason.split('(')[0] if '(' in reason else reason
-                rejection_reasons[reason_type] = rejection_reasons.get(
-                    reason_type, 0) + 1
+                rejection_reasons[reason_type] = rejection_reasons.get(reason_type, 0) + 1
             for reason, count in sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True):
                 print(f"  {reason}: {count} chains")
 
             print(f"\nDEBUG ArcReconstructor: Detailed rejection info (first 20 chains):")
             for chain_idx, detour, reason, metrics, center, bbox in fit_rejection_details[:20]:
-                print(f"  Chain {chain_idx}:")
-                print(
-                    f"    Location: center=({center[0]:.1f}, {center[1]:.1f}), bbox=({bbox[0]:.1f},{bbox[1]:.1f})-({bbox[2]:.1f},{bbox[3]:.1f})")
-                print(f"    Detour index: {detour:.4f}")
-                print(f"    Rejection reason: {reason}")
+                print(f"  Chain {chain_idx}: center=({center[0]:.1f}, {center[1]:.1f}), detour={detour:.4f}, reason={reason}")
                 if metrics:
-                    radius_val = metrics.get('radius')
-                    sweep_val = metrics.get('sweep_angle_deg')
-                    ratio_val = metrics.get('chord_radius_ratio')
-                    radius_str = f"{radius_val:.2f}" if radius_val is not None else "N/A"
-                    sweep_str = f"{sweep_val:.1f}°" if sweep_val is not None else "N/A"
-                    ratio_str = f"{ratio_val:.2f}" if ratio_val is not None else "N/A"
-                    print(
-                        f"    Metrics: radius={radius_str}, sweep_angle={sweep_str}, chord_radius_ratio={ratio_str}")
+                    radius = metrics.get('radius', 'N/A')
+                    sweep = metrics.get('sweep_angle_deg', 'N/A')
+                    ratio = metrics.get('chord_radius_ratio', 'N/A')
+                    radius_str = f"{radius:.2f}" if isinstance(radius, (int, float)) else radius
+                    sweep_str = f"{sweep:.1f}°" if isinstance(sweep, (int, float)) else sweep
+                    ratio_str = f"{ratio:.2f}" if isinstance(ratio, (int, float)) else ratio
+                    print(f"    Metrics: radius={radius_str}, sweep_angle={sweep_str}, chord_radius_ratio={ratio_str}")
 
         print(
             f"\nDEBUG ArcReconstructor: Final result: {len(reconstructed_arcs)} reconstructed arcs from {len(used_line_indices)} line segments")
@@ -794,25 +684,18 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
                          for idx in component if arc_data[idx] is not None]
 
                 if len(centers) >= 3 and len(radii) >= 3:
-                    # Check if centers are clustered (annotation patterns have similar centers)
+                    # Check if centers are clustered and radii are similar (annotation patterns)
                     centers_array = np.array(centers)
                     center_mean = np.mean(centers_array, axis=0)
-                    center_distances = [np.linalg.norm(
-                        c - center_mean) for c in centers]
-                    max_center_deviation = max(
-                        center_distances) if center_distances else float('inf')
-
-                    # Check if radii are similar (annotation patterns have uniform radius)
+                    max_center_deviation = max(np.linalg.norm(c - center_mean) for c in centers)
+                    
                     radius_mean = np.mean(radii)
-                    radius_deviations = [abs(r - radius_mean) for r in radii]
-                    max_radius_deviation = max(
-                        radius_deviations) if radius_deviations else float('inf')
-
+                    max_radius_deviation = max(abs(r - radius_mean) for r in radii)
+                    
                     # Only filter if centers are close together AND radii are similar
-                    # This prevents filtering door swing arcs that happen to touch annotation arcs
-                    center_tolerance = page_diagonal * 0.01  # Centers within 1% of page diagonal
-                    radius_tolerance = radius_mean * 0.2  # Radii within 20% of mean
-
+                    center_tolerance = page_diagonal * 0.01
+                    radius_tolerance = radius_mean * 0.2
+                    
                     if max_center_deviation < center_tolerance and max_radius_deviation < radius_tolerance:
                         arc_indices_to_remove.update(component)
 
@@ -850,25 +733,20 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
     MIN_LENGTH = page_diagonal * 0.005  # 0.5% of page diagonal (dust)
     MAX_LENGTH = page_diagonal * 0.05  # 6% of page diagonal (extremely long)
 
+    def line_length(line):
+        start, end = line['start'], line['end']
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        return (dx*dx + dy*dy) ** 0.5
+
     # Filter out dust and extremely long lines
-    filtered_lines = []
-    for line in lines:
-        start = line['start']
-        end = line['end']
-        dx = end[0] - start[0]
-        dy = end[1] - start[1]
-        length = (dx*dx + dy*dy) ** 0.5
-        if MIN_LENGTH <= length <= MAX_LENGTH:
-            filtered_lines.append(line)
+    filtered_lines = [line for line in lines if MIN_LENGTH <= line_length(line) <= MAX_LENGTH]
 
     # Filter out dust and extremely long arcs (using chord length)
     filtered_arcs_for_percentile = []
     for arc in arcs:
-        control_points = arc['control_points']
-        if len(control_points) == 4:
-            p0 = np.array(control_points[0])
-            p3 = np.array(control_points[3])
-            chord_length = np.linalg.norm(p3 - p0)
+        cp = arc.get('control_points', [])
+        if len(cp) == 4:
+            chord_length = np.linalg.norm(np.array(cp[3]) - np.array(cp[0]))
             if MIN_LENGTH <= chord_length <= MAX_LENGTH:
                 filtered_arcs_for_percentile.append(arc)
 
@@ -891,36 +769,23 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
     min_threshold = np.percentile(all_strokes, door_min_percentile)
     max_threshold = np.percentile(all_strokes, door_max_percentile)
 
-    # Calculate arc thresholds based on ARC stroke widths only, not combined
+    # Calculate arc thresholds based on ARC stroke widths only
     if arc_strokes:
         arc_min_threshold = np.percentile(arc_strokes, 20)
         arc_max_threshold = np.percentile(arc_strokes, 100)
-        print(
-            f"DEBUG filter_door_candidates: Arc stroke width range: min={min(arc_strokes):.3f}, max={max(arc_strokes):.3f}, 40th={arc_min_threshold:.3f}, 80th={arc_max_threshold:.3f}")
+        print(f"DEBUG filter_door_candidates: Arc stroke width range: min={min(arc_strokes):.3f}, max={max(arc_strokes):.3f}, 20th={arc_min_threshold:.3f}, 100th={arc_max_threshold:.3f}")
     else:
-        arc_min_threshold = 0
-        arc_max_threshold = 0
+        arc_min_threshold = arc_max_threshold = 0
 
-    door_lines = []
-    door_arcs = []
+    # Filter lines by stroke width
+    door_lines = [line for line in filtered_lines if min_threshold <= line['stroke_width'] <= max_threshold]
 
-    # Filter lines by stroke width (using already length-filtered lines)
-    for line in filtered_lines:
-        stroke_width = line['stroke_width']
-        if min_threshold <= stroke_width <= max_threshold:
-            door_lines.append(line)
-
-    # Filter arcs by stroke width (using already length-filtered arcs)
-    arcs_filtered_out = 0
-    for arc in filtered_arcs_for_percentile:
-        if arc_min_threshold <= arc['stroke_width'] <= arc_max_threshold:
-            door_arcs.append(arc)
-        else:
-            arcs_filtered_out += 1
-
+    # Filter arcs by stroke width
+    door_arcs = [arc for arc in filtered_arcs_for_percentile if arc_min_threshold <= arc['stroke_width'] <= arc_max_threshold]
+    arcs_filtered_out = len(filtered_arcs_for_percentile) - len(door_arcs)
+    
     if arcs_filtered_out > 0:
-        print(
-            f"DEBUG filter_door_candidates: Filtered out {arcs_filtered_out} arcs, kept {len(door_arcs)} arcs")
+        print(f"DEBUG filter_door_candidates: Filtered out {arcs_filtered_out} arcs, kept {len(door_arcs)} arcs")
 
     return door_lines, door_arcs
 
