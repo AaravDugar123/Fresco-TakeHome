@@ -64,7 +64,7 @@ class ArcReconstructor:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
         self.segment_max_threshold = page_diagonal * 0.003
         self.segment_min_threshold = page_diagonal * 0.00035
-        self.gap_tolerance = page_diagonal * 0.0016
+        self.gap_tolerance = page_diagonal * 0.001
 
     def _is_short_segment(self, line: Dict) -> bool:
         """Check if line is short enough to be a tessellated segment (but not too small - dust)."""
@@ -337,10 +337,10 @@ class ArcReconstructor:
 
             # Store metrics for debugging
             metrics = {'radius': radius, 'max_error': max_error,
-                       'error_threshold': radius * .6}
+                       'error_threshold': radius * .8}
 
-            if max_error > radius * .6:
-                return None, f"max_error_too_high({max_error:.2f} > {radius * .6:.2f}, radius={radius:.2f}, margin={max_error - radius * 0.6:.2f})", metrics
+            if max_error > radius * .8:
+                return None, f"max_error_too_high({max_error:.2f} > {radius * .8:.2f}, radius={radius:.2f}, margin={max_error - radius * 0.8:.2f})", metrics
 
             start_vec = p0 - center
             end_vec = p_end - center
@@ -371,7 +371,7 @@ class ArcReconstructor:
                 else:
                     return None, f"sweep_angle_out_of_range({sweep_angle_deg:.1f}° >= 360°)", metrics
             if sweep_angle_deg > 120:
-                return None, f"sweep_angle_too_large({sweep_angle_deg:.1f}° > 120°, margin={sweep_angle_deg - 200:.1f}°)", metrics
+                return None, f"sweep_angle_too_large({sweep_angle_deg:.1f}° > 150°, margin={sweep_angle_deg - 150:.1f}°)", metrics
 
             chord_length = np.linalg.norm(p_end - p0)
             if chord_length < 1e-1:
@@ -631,55 +631,60 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
     """
     if len(arcs) < 3:
         return arcs  # Need at least 3 arcs to form a circle pattern
-    
+
     page_diagonal = np.sqrt(page_width**2 + page_height**2)
-    touch_tolerance_sq = (page_diagonal * 0.002) ** 2  # Squared distance for speed
-    
+    # Squared distance for speed
+    touch_tolerance_sq = (page_diagonal * 0.002) ** 2
+
     n = len(arcs)
-    
-    # Pre-compute endpoints and sweep angles (cache for speed)
+
+    # Pre-compute endpoints, centers, radii, and sweep angles (cache for speed)
     arc_data = []
     for arc in arcs:
         cp = arc.get('control_points')
         if not cp or len(cp) != 4:
             arc_data.append(None)
             continue
-        
+
         start = np.array(cp[0])
         end = np.array(cp[3])
-        
+
+        # Get radius and center (needed for pattern detection)
+        result = get_bezier_radius(cp)
+        if result is None:
+            arc_data.append(None)
+            continue
+        radius, center = result
+
         # Get sweep angle (cache it)
         sweep = arc.get('sweep_angle')
         if sweep is None:
-            result = get_bezier_radius(cp)
-            if result is None:
-                arc_data.append(None)
-                continue
-            radius, _ = result
             from src.door_classifier import calculate_arc_sweep_angle
             sweep = calculate_arc_sweep_angle(arc, radius)
             if sweep is None:
                 arc_data.append(None)
                 continue
-        
+
         arc_data.append({
             'start': start,
             'end': end,
-            'sweep': sweep
+            'sweep': sweep,
+            'radius': radius,
+            'center': center
         })
-    
+
     # Build adjacency list (which arcs touch each other) - O(n²) but optimized
     adjacency = [[] for _ in range(n)]
     for i in range(n):
         if arc_data[i] is None:
             continue
         s1, e1 = arc_data[i]['start'], arc_data[i]['end']
-        
+
         for j in range(i + 1, n):
             if arc_data[j] is None:
                 continue
             s2, e2 = arc_data[j]['start'], arc_data[j]['end']
-            
+
             # Check if any endpoints are close (squared distance for speed)
             touches = False
             for p1 in [s1, e1]:
@@ -689,44 +694,72 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
                         break
                 if touches:
                     break
-            
+
             if touches:
                 adjacency[i].append(j)
                 adjacency[j].append(i)
-    
+
     # Find all connected components using BFS
     visited = set()
     arc_indices_to_remove = set()
-    
+
     for start_idx in range(n):
         if start_idx in visited or arc_data[start_idx] is None:
             continue
-        
+
         # BFS to find all connected arcs
         component = []
         queue = [start_idx]
         visited.add(start_idx)
-        
+
         while queue:
             idx = queue.pop(0)
             component.append(idx)
-            
+
             for neighbor in adjacency[idx]:
                 if neighbor not in visited:
                     visited.add(neighbor)
                     queue.append(neighbor)
-        
+
         # Check if this component matches the pattern (3+ arcs, >200° total)
+        # BUT also verify they form a closed circle (similar centers and radii)
         if len(component) >= 3:
-            total_sweep = sum(arc_data[idx]['sweep'] for idx in component if arc_data[idx] is not None)
+            total_sweep = sum(arc_data[idx]['sweep']
+                              for idx in component if arc_data[idx] is not None)
+            
             if total_sweep > 200:
-                arc_indices_to_remove.update(component)
-    
+                # Additional validation: check if arcs share similar centers and radii
+                # (annotation patterns form closed circles with uniform geometry)
+                centers = [arc_data[idx]['center'] for idx in component if arc_data[idx] is not None]
+                radii = [arc_data[idx]['radius'] for idx in component if arc_data[idx] is not None]
+                
+                if len(centers) >= 3 and len(radii) >= 3:
+                    # Check if centers are clustered (annotation patterns have similar centers)
+                    centers_array = np.array(centers)
+                    center_mean = np.mean(centers_array, axis=0)
+                    center_distances = [np.linalg.norm(c - center_mean) for c in centers]
+                    max_center_deviation = max(center_distances) if center_distances else float('inf')
+                    
+                    # Check if radii are similar (annotation patterns have uniform radius)
+                    radius_mean = np.mean(radii)
+                    radius_deviations = [abs(r - radius_mean) for r in radii]
+                    max_radius_deviation = max(radius_deviations) if radius_deviations else float('inf')
+                    
+                    # Only filter if centers are close together AND radii are similar
+                    # This prevents filtering door swing arcs that happen to touch annotation arcs
+                    center_tolerance = page_diagonal * 0.01  # Centers within 1% of page diagonal
+                    radius_tolerance = radius_mean * 0.2  # Radii within 20% of mean
+                    
+                    if max_center_deviation < center_tolerance and max_radius_deviation < radius_tolerance:
+                        arc_indices_to_remove.update(component)
+
     if arc_indices_to_remove:
-        filtered_arcs = [arc for idx, arc in enumerate(arcs) if idx not in arc_indices_to_remove]
-        print(f"DEBUG filter_door_candidates: Filtered out {len(arc_indices_to_remove)} arcs forming circular annotation patterns")
+        filtered_arcs = [arc for idx, arc in enumerate(
+            arcs) if idx not in arc_indices_to_remove]
+        print(
+            f"DEBUG filter_door_candidates: Filtered out {len(arc_indices_to_remove)} arcs forming circular annotation patterns")
         return filtered_arcs
-    
+
     return arcs
 
 
@@ -775,7 +808,7 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
             chord_length = np.linalg.norm(p3 - p0)
             if MIN_LENGTH <= chord_length <= MAX_LENGTH:
                 filtered_arcs_for_percentile.append(arc)
-    
+
     # Filter out circular annotation patterns (3+ arcs forming >200° circle)
     filtered_arcs_for_percentile = _filter_circular_annotation_patterns(
         filtered_arcs_for_percentile, page_width, page_height)
