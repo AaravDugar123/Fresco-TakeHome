@@ -100,22 +100,23 @@ def check_arcs_touch(arc1: Dict, arc2: Dict, threshold: float) -> Tuple[bool, Op
     arc2_start = np.array(arc2['control_points'][0])
     arc2_end = np.array(arc2['control_points'][-1])
 
-    # Check all 4 endpoint combinations
-    distances = [
-        (np.linalg.norm(arc1_start - arc2_start),
+    # Check all 4 endpoint combinations (use squared distances for speed)
+    threshold_sq = threshold * threshold
+    distances_sq = [
+        (np.sum((arc1_start - arc2_start) ** 2),
          arc1_start, arc2_start, arc1_end, arc2_end),
-        (np.linalg.norm(arc1_start - arc2_end),
+        (np.sum((arc1_start - arc2_end) ** 2),
          arc1_start, arc2_end, arc1_end, arc2_start),
-        (np.linalg.norm(arc1_end - arc2_start),
+        (np.sum((arc1_end - arc2_start) ** 2),
          arc1_end, arc2_start, arc1_start, arc2_end),
-        (np.linalg.norm(arc1_end - arc2_end),
+        (np.sum((arc1_end - arc2_end) ** 2),
          arc1_end, arc2_end, arc1_start, arc2_start)
     ]
 
-    min_dist, touch1, touch2, other1, other2 = min(
-        distances, key=lambda x: x[0])
+    min_dist_sq, touch1, touch2, other1, other2 = min(
+        distances_sq, key=lambda x: x[0])
 
-    if min_dist <= threshold:
+    if min_dist_sq <= threshold_sq:
         return True, (touch1, touch2, other1, other2)
     return False, None
 
@@ -146,22 +147,33 @@ def classify_edge_double_doors(double_door_candidates: List[Dict], debug: bool =
         print(
             f"DEBUG classify_edge_double_doors: Checking {len(double_door_candidates)} double door candidates")
 
+    # Pre-cache arc geometry to avoid repeated calculations in nested loops
+    arc_cache = []
+    for arc in double_door_candidates:
+        if 'center' in arc and 'radius' in arc:
+            center = np.array(arc['center'])
+            radius = arc['radius']
+        else:
+            result = get_bezier_radius(arc['control_points'])
+            if result is None:
+                arc_cache.append(None)
+                continue
+            radius, center = result
+        sweep = calculate_arc_sweep_angle(arc, radius)
+        arc_cache.append((radius, center, sweep))
+
     for i in range(len(double_door_candidates)):
         if i in used_indices:
             continue
 
         arc1 = double_door_candidates[i]
 
-        # Get arc1 radius and geometry
-        result1 = get_bezier_radius(arc1['control_points'])
-        if result1 is None:
+        # Get arc1 geometry from cache
+        if arc_cache[i] is None:
             if debug:
                 print(f"  Arc {i}: Failed to calculate radius, skipping")
             continue
-        radius1, center1 = result1
-
-        # Get sweep angle for arc1
-        sweep1 = calculate_arc_sweep_angle(arc1, radius1)
+        radius1, center1, sweep1 = arc_cache[i]
 
         for j in range(i + 1, len(double_door_candidates)):
             if j in used_indices:
@@ -169,16 +181,12 @@ def classify_edge_double_doors(double_door_candidates: List[Dict], debug: bool =
 
             arc2 = double_door_candidates[j]
 
-            # Get arc2 radius
-            result2 = get_bezier_radius(arc2['control_points'])
-            if result2 is None:
+            # Get arc2 geometry from cache
+            if arc_cache[j] is None:
                 if debug:
                     print(f"  Arc {j}: Failed to calculate radius, skipping")
                 continue
-            radius2, center2 = result2
-
-            # Get sweep angle for arc2
-            sweep2 = calculate_arc_sweep_angle(arc2, radius2)
+            radius2, center2, sweep2 = arc_cache[j]
 
             if debug:
                 print(f"\n  Checking arc pair ({i}, {j}):")
@@ -189,25 +197,26 @@ def classify_edge_double_doors(double_door_candidates: List[Dict], debug: bool =
 
             # Use the average radius for distance checks
             avg_radius = (radius1 + radius2) / 2
-            touch_threshold_combined = avg_radius * 0.4
+            touch_threshold_combined = avg_radius * 0.1
 
             # Check if arcs touch at one set of endpoints
             touches, endpoint_info = check_arcs_touch(
                 arc1, arc2, touch_threshold_combined)
 
             if not touches:
-                # Calculate minimum distance between any endpoints for debug
+                # Calculate minimum distance between any endpoints for debug (use squared distances)
                 arc1_start = np.array(arc1['control_points'][0])
                 arc1_end = np.array(arc1['control_points'][-1])
                 arc2_start = np.array(arc2['control_points'][0])
                 arc2_end = np.array(arc2['control_points'][-1])
 
-                min_endpoint_dist = min(
-                    np.linalg.norm(arc1_start - arc2_start),
-                    np.linalg.norm(arc1_start - arc2_end),
-                    np.linalg.norm(arc1_end - arc2_start),
-                    np.linalg.norm(arc1_end - arc2_end)
+                min_dist_sq = min(
+                    np.sum((arc1_start - arc2_start) ** 2),
+                    np.sum((arc1_start - arc2_end) ** 2),
+                    np.sum((arc1_end - arc2_start) ** 2),
+                    np.sum((arc1_end - arc2_end) ** 2)
                 )
+                min_endpoint_dist = np.sqrt(min_dist_sq)
 
                 if debug:
                     margin = touch_threshold_combined - min_endpoint_dist
@@ -304,17 +313,19 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold = arc_radius * .05  # if the arc touches
-    # has to be greater than .05
+    threshold = arc_radius * .15 # if the arc touches LOOK HERE
 
-    distances = [
-        np.linalg.norm(arc_start - line_start),
-        np.linalg.norm(arc_start - line_end),
-        np.linalg.norm(arc_end - line_start),
-        np.linalg.norm(arc_end - line_end)
+    threshold_sq = threshold * threshold
+
+    # Use squared distances to avoid sqrt (faster)
+    distances_sq = [
+        np.sum((arc_start - line_start) ** 2),
+        np.sum((arc_start - line_end) ** 2),
+        np.sum((arc_end - line_start) ** 2),
+        np.sum((arc_end - line_end) ** 2)
     ]
 
-    return min(distances) <= threshold
+    return min(distances_sq) <= threshold_sq
 
 
 def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np.ndarray, debug: bool = False, arc_idx: int = -1) -> Optional[Dict]:
@@ -343,8 +354,8 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
     # Wider tolerance for smaller angles (more variation in door designs)
     if sweep_angle >= 60:  # LOOK HERE ratios
         # Larger angles: tighter bounds (0.6x to 1.3x expected)
-        min_ratio = expected_ratio * 0.5
-        max_ratio = expected_ratio * 1.3
+        min_ratio = expected_ratio * 0.45
+        max_ratio = expected_ratio * 1.55
     elif sweep_angle >= 30:
         # Medium angles: moderate bounds (0.5x to 1.5x expected)
         min_ratio = expected_ratio * 0.6
@@ -456,9 +467,13 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
         arc_rect = arc['path_rect']
         arc_x0, arc_y0, arc_x1, arc_y1 = arc_rect
 
-        buffer = arc_radius * .7  # LOOK HERE bbox
+        buffer = arc_radius * .15  # LOOK HERE bbox
         arc_bbox = (arc_x0 - buffer, arc_y0 - buffer,
                     arc_x1 + buffer, arc_y1 + buffer)
+
+        # Cache arc control points as numpy arrays (avoid repeated conversions)
+        arc_start_arr = np.array(arc['control_points'][0])
+        arc_end_arr = np.array(arc['control_points'][-1])
 
         for i, line in enumerate(lines):
             if i in used_lines:
@@ -493,25 +508,31 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                     arc_bbox[1] <= line_bbox[3] and line_bbox[1] <= arc_bbox[3]):
                 continue
 
+            # Cache line points as numpy arrays (avoid repeated conversions)
+            line_start_arr = np.array(line['start'])
+            line_end_arr = np.array(line['end'])
+
             # Check touch using the actual function (for both logic and debug)
             touch_result = check_arc_line_touch(arc, line, arc_radius)
-            touch_threshold = arc_radius * 0.85  # LOOK here for touch check normal
+            touch_threshold = arc_radius * .15  # LOOK here for DEBUG
+
+            # Calculate distances once (reused for debug and triangle angle test)
+            # Use squared distances for finding minimum (faster), then sqrt only once
+            dists_sq = [
+                (np.sum((arc_start_arr - line_start_arr) ** 2),
+                 arc_start_arr, line_start_arr, line_end_arr),
+                (np.sum((arc_start_arr - line_end_arr) ** 2),
+                 arc_start_arr, line_end_arr, line_start_arr),
+                (np.sum((arc_end_arr - line_start_arr) ** 2),
+                 arc_end_arr, line_start_arr, line_end_arr),
+                (np.sum((arc_end_arr - line_end_arr) ** 2),
+                 arc_end_arr, line_end_arr, line_start_arr)
+            ]
+            min_dist_sq, hinge_point, line_touch_point, line_other_point = min(
+                dists_sq, key=lambda x: x[0])
+            min_touch_dist = np.sqrt(min_dist_sq)
 
             if debug:
-                # Always calculate touch distance for detailed info
-                arc_start = np.array(arc['control_points'][0])
-                arc_end = np.array(arc['control_points'][-1])
-                line_start_arr = np.array(line['start'])
-                line_end_arr = np.array(line['end'])
-
-                distances = [
-                    np.linalg.norm(arc_start - line_start_arr),
-                    np.linalg.norm(arc_start - line_end_arr),
-                    np.linalg.norm(arc_end - line_start_arr),
-                    np.linalg.norm(arc_end - line_end_arr)
-                ]
-                min_touch_dist = min(distances)
-
                 if touch_result:
                     lines_passed_touch += 1
                     # Store touch info for the matching line (shown later)
@@ -530,28 +551,10 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             # Filter: Triangle Angle Test - check if arc faces wrong way
             # For real doors: arc curves AWAY from line (sharp angle ~70-90°)
             # For false positives: arc curves TOWARD line (wide angle ~120-150°)
-            arc_start = np.array(arc['control_points'][0])
-            arc_end = np.array(arc['control_points'][-1])
-            line_start_arr = np.array(line['start'])
-            line_end_arr = np.array(line['end'])
-
-            # Find which arc endpoint touches the line (Point A - Hinge)
-            dists = [
-                (np.linalg.norm(arc_start - line_start_arr),
-                 arc_start, line_start_arr, line_end_arr),
-                (np.linalg.norm(arc_start - line_end_arr),
-                 arc_start, line_end_arr, line_start_arr),
-                (np.linalg.norm(arc_end - line_start_arr),
-                 arc_end, line_start_arr, line_end_arr),
-                (np.linalg.norm(arc_end - line_end_arr),
-                 arc_end, line_end_arr, line_start_arr)
-            ]
-            _, hinge_point, line_touch_point, line_other_point = min(
-                dists, key=lambda x: x[0])
 
             # Point B: Midpoint of the arc (curve peak)
             # Use the midpoint of the arc's control points or calculate from the arc
-            arc_midpoint = (arc_start + arc_end) / 2
+            arc_midpoint = (arc_start_arr + arc_end_arr) / 2
 
             # Calculate angle at hinge (Point A)
             # Vector from hinge to curve peak
@@ -569,7 +572,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 angle_deg = np.degrees(np.arccos(cos_angle))
 
                 # Reject if angle > 100° (arc curves toward line, not away)
-                if angle_deg > 142:  # look here triangle test
+                if angle_deg > 115:  # look here triangle test
                     if debug:
                         rejection_reason = f"Arc faces wrong way (hinge angle={angle_deg:.1f}° > 100°)"
                     continue
@@ -627,7 +630,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
     double_doors = []
     if page_width is not None and page_height is not None and len(swing_doors) > 1:
         page_diagonal = np.sqrt(page_width**2 + page_height**2)
-        buffer = page_diagonal * 0.00025  # overlapping single doors look here
+        buffer = page_diagonal * 0.000225  # overlapping single doors look here
 
         # Pre-calculate all bboxes once (fast path using path_rect)
         door_bboxes = []

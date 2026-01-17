@@ -886,8 +886,8 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
 
     # Calculate thresholds relative to page size
     page_diagonal = np.sqrt(page_width**2 + page_height**2)
-    MIN_LENGTH = page_diagonal * 0.005  # 0.5% of page diagonal (dust)
-    MAX_LENGTH = page_diagonal * 0.05  # 6% of page diagonal (extremely long)
+    MIN_LENGTH = page_diagonal * 0.00325  # 0.5% of page diagonal (dust)
+    MAX_LENGTH = page_diagonal * 0.04  # 6% of page diagonal (extremely long)
 
     def line_length(line):
         start, end = line['start'], line['end']
@@ -912,7 +912,7 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
         filtered_arcs_for_percentile, page_width, page_height)
 
     # Hardcoded percentiles for door filtering
-    door_min_percentile = 40
+    door_min_percentile = 30
     door_max_percentile = 100
 
     # Calculate thresholds using filtered geometry only (no dust, no extremely long)

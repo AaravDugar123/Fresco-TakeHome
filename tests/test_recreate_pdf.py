@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
-    "FirstSource_R25-01360-A-V03.pdf_-_Page_2.pdf"
+    "CFStat_ATT-PFMD-102125-Drawings-CF_Station_227_New_Build.pdf_-_Page_22.pdf"
 
 print("Extracting vectors...")
 result = extract_vectors(str(pdf_path))
