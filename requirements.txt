@@ -1,7 +1,4 @@
-# Core dependencies
-pymupdf>=1.23.0  # PyMuPDF for PDF vector extraction
-numpy>=1.24.0  # NumPy for geometric calculations
-Pillow>=10.0.0  # Pillow for image processing (if needed later)
-FastAPI>=0.104.0  # FastAPI for web app (if needed later)
-python-multipart>=0.0.6  # For FastAPI file uploads (if needed later)
-uvicorn>=0.24.0  # ASGI server for FastAPI (if needed later)
+pymupdf>=1.23.0
+numpy>=1.24.0
+Flask>=3.0.0
+flask-cors>=4.0.0
