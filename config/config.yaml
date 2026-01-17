@@ -1,9 +1,4 @@
 # Configuration for door detection system
-# CV model selection: openai, anthropic, local
-cv_model: openai
-
-# Confidence threshold for CV fallback (0-1)
-confidence_threshold: 0.7
 
 # Output format preferences
 output_format: image  # image or pdf
