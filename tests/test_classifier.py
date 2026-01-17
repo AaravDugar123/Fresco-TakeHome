@@ -9,11 +9,9 @@ import pymupdf
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-#CFStat_ATT-PFMD-102125-Drawings-CF_Station_227_New_Build.pdf_-_Page_22.pdf
-#CopellIndependent_NA02-01_-_FLOOR_PLAN_-LEVEL_ONE_-_CoppellIndependent.pdf_-_Page_30.pdf
 # Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
-    "FirstSource_R25-01360-A-V03.pdf_-_Page_2.pdf"
+    "CopellIndependent_NA02-01_-_FLOOR_PLAN_-LEVEL_ONE_-_CoppellIndependent.pdf_-_Page_30.pdf"
 
 # Start timing
 start_time = time.time()
@@ -35,9 +33,9 @@ analysis = analyze_geometry(
 # Classify swing doors (use pre-filtered candidates to avoid redundant checks)
 print("Classifying swing doors...")
 door_result = classify_swing_doors(
-    analysis['door_candidate_arcs'],  # Use pre-filtered arcs
+    analysis['door_candidate_arcs'], 
     analysis['filtered_lines'],
-    debug=True,  # Enable debug output
+    debug=True,  
     page_width=result['page_width'],
     page_height=result['page_height'],
     double_door_candidates=analysis.get('double_door_candidates', [])  # Pass double door candidates for edge detection
@@ -49,7 +47,7 @@ bifold_doors = door_result.get('bifold_doors', [])
 
 print(f"\nFound {len(swing_doors)} swing doors, {len(double_doors)} double doors, {len(bifold_doors)} bifold doors")
 
-# Open PDF and draw rectangles
+# draw rectangles
 doc = pymupdf.open(str(pdf_path))
 page = doc[0]
 

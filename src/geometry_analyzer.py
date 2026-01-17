@@ -471,25 +471,13 @@ class ArcReconstructor:
         """
         start_time = time.time() if self.debug else None
 
-        # Find candidate segments
         segments_with_indices = [(i, line) for i, line in enumerate(
             lines) if self._is_short_segment(line)]
-
-        if self.debug:
-            segment_time = time.time()
-            print(f"DEBUG ArcReconstructor: Found {len(segments_with_indices)} candidate segments "
-                  f"out of {len(lines)} total lines (took {segment_time - start_time:.3f}s)")
 
         if len(segments_with_indices) < 3:
             return [], set(), []
 
-        # Chain segments
         chains = self._chain_segments(segments_with_indices)
-
-        if self.debug:
-            chain_time = time.time()
-            print(f"DEBUG ArcReconstructor: Formed {len(chains)} chains from segments "
-                  f"(took {chain_time - segment_time:.3f}s)")
 
         if not chains:
             return [], set(), []
@@ -517,9 +505,6 @@ class ArcReconstructor:
                 if arc is not None:
                     reconstructed_arcs.append(arc)
                     used_line_indices.update(orig_idx for orig_idx, _ in chain)
-                    if self.debug:
-                        print(f"DEBUG ArcReconstructor: Chain {chain_idx}: Reconstructed arc "
-                              f"(radius={arc['radius']:.2f}, sweep={arc['sweep_angle']:.1f}°)")
                 else:
                     rejected_chains.append({
                         'chain_idx': chain_idx,
@@ -529,9 +514,6 @@ class ArcReconstructor:
                         'detour_index': detour_index,
                         'metrics': metrics
                     })
-                    if self.debug:
-                        print(
-                            f"DEBUG ArcReconstructor: Chain {chain_idx}: Rejected - {diagnostic}")
             else:
                 rejected_chains.append({
                     'chain_idx': chain_idx,
@@ -543,9 +525,8 @@ class ArcReconstructor:
                 })
 
         if self.debug:
-            total_time = time.time() - start_time
-            print(f"DEBUG ArcReconstructor: Final result: {len(reconstructed_arcs)} reconstructed arcs "
-                  f"from {len(used_line_indices)} line segments (took {total_time:.3f}s)")
+            print(
+                f"Reconstructed {len(reconstructed_arcs)} arcs from {len(used_line_indices)} segments")
 
         return reconstructed_arcs, used_line_indices, rejected_chains
 
@@ -727,12 +708,6 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
     door_arcs = [arc for arc in filtered_arcs_for_percentile if arc_min_threshold <=
                  arc['stroke_width'] <= arc_max_threshold]
 
-    if debug:
-        arcs_filtered_out = len(filtered_arcs_for_percentile) - len(door_arcs)
-        if arcs_filtered_out > 0:
-            print(
-                f"DEBUG filter_door_candidates: Filtered out {arcs_filtered_out} arcs, kept {len(door_arcs)} arcs")
-
     return door_lines, door_arcs
 
 
@@ -747,42 +722,29 @@ def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dic
     Returns dictionary with filtered lines, arcs, and door candidates.
     """
     if debug:
-        print(f"\nDEBUG analyze_geometry: Initial extraction counts:")
         print(
-            f"  Lines: {len(lines)}, Arcs: {len(arcs)}, Dashed lines: {len(dashed_lines)}")
+            f"Lines: {len(lines)}, Arcs: {len(arcs)}, Dashed lines: {len(dashed_lines)}")
 
-    # Combine solid and dashed lines
     all_lines = lines + dashed_lines
 
-    # Step 1: Reconstruct arcs from tessellated segments
     reconstructor = ArcReconstructor(page_width, page_height, debug=debug)
     reconstructed_arcs, used_line_indices, rejected_chains = reconstructor.reconstruct_arcs(
         all_lines)
 
     if reconstructed_arcs:
-        if debug:
-            print(f"DEBUG analyze_geometry: Reconstructed {len(reconstructed_arcs)} arcs "
-                  f"from {len(used_line_indices)} tessellated segments")
         arcs = arcs + reconstructed_arcs
         used_set = used_line_indices if isinstance(
             used_line_indices, set) else set(used_line_indices)
         all_lines = [line for i, line in enumerate(
             all_lines) if i not in used_set]
-        if debug:
-            print(
-                f"DEBUG analyze_geometry: Removed {len(used_line_indices)} tessellated segments from lines list")
 
-    # Step 2: Filter door candidates
     filtered_lines, filtered_arcs = filter_door_candidates(
         all_lines, arcs, page_width, page_height, debug=debug)
 
     if debug:
         print(
-            f"DEBUG analyze_geometry: Number of filtered lines: {len(filtered_lines)}")
-        print(
-            f"DEBUG analyze_geometry: Number of filtered arcs: {len(filtered_arcs)}")
+            f"Filtered lines: {len(filtered_lines)}, Filtered arcs: {len(filtered_arcs)}")
 
-    # Step 3: Separate arcs for swing doors (< 120°) and double doors (150-210°)
     swing_door_arcs = []
     double_door_candidates = []
 
@@ -796,21 +758,13 @@ def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dic
         else:
             swing_door_arcs.append(arc)
 
-    # Remove double door candidates from filtered_arcs
     double_door_ids = {id(arc) for arc in double_door_candidates}
     filtered_arcs_without_double_doors = [
         arc for arc in filtered_arcs if id(arc) not in double_door_ids]
 
     if debug:
-        print(f"DEBUG analyze_geometry: Arc separation:")
-        print(f"  Arcs < 120°: {len(swing_door_arcs)} (swing door candidates)")
         print(
-            f"  Arcs 150-210°: {len(double_door_candidates)} (double door candidates)")
-        if double_door_candidates:
-            sweep_angles = [arc.get('sweep_angle')
-                            for arc in double_door_candidates]
-            print(
-                f"  Double door candidate sweep angles: {[f'{s:.1f}°' for s in sweep_angles]}")
+            f"Swing door arcs: {len(swing_door_arcs)}, Double door arcs: {len(double_door_candidates)}")
 
     return {
         "filtered_lines": filtered_lines,

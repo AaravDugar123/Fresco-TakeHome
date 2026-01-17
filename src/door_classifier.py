@@ -6,7 +6,7 @@ from src.geometry_analyzer import get_bezier_radius
 
 
 # ============================================================================
-# UNIVERSAL UTILITY FUNCTIONS FOR DOOR CLASSIFICATIONS
+# UNIVERSAL FUNCS FOR DOOR CLASSIFICATION
 # ============================================================================
 
 def calculate_arc_sweep_angle(arc: Dict, radius: float) -> Optional[float]:
@@ -18,7 +18,7 @@ def calculate_arc_sweep_angle(arc: Dict, radius: float) -> Optional[float]:
     p0, p3 = np.array(pts[0]), np.array(pts[3])
     chord_len = np.linalg.norm(p3 - p0)
 
-    # Cap chord to diameter to avoid domain errors
+    # Cap chord to diameter
     if chord_len > 2 * radius:
         chord_len = 2 * radius
 
@@ -121,9 +121,6 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
     """Classify a single swing door from an arc-line pair."""
     sweep_angle = calculate_arc_sweep_angle(arc, arc_radius)
     if sweep_angle is None or not (12.5 <= sweep_angle <= 103.5):
-        if debug:
-            print(
-                f"  ✗ Sweep angle {sweep_angle:.1f}° not in range 12.5-103.5°")
         return None
 
     # Ratio check: line length vs radius (scaled by sweep angle)
@@ -142,13 +139,7 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
         min_ratio, max_ratio = expected_ratio * 0.5, expected_ratio * 1.5
 
     if not (min_ratio < ratio < max_ratio):
-        if debug:
-            print(
-                f"  ✗ Ratio {ratio:.2f} not in range {min_ratio:.2f}-{max_ratio:.2f}")
         return None
-
-    if debug:
-        print(f"  ✓ Sweep: {sweep_angle:.1f}°, Ratio: {ratio:.2f}")
 
     return {
         "type": "swing_door",
@@ -184,12 +175,6 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 continue
             arc_radius, arc_center = result
 
-        if debug:
-            sweep = calculate_arc_sweep_angle(arc, arc_radius)
-            print(f"\nArc {arc_idx}: center=({int(arc_center[0])}, {int(arc_center[1])}), "
-                  f"radius={arc_radius:.1f}, sweep={sweep:.1f}°" if sweep else f"radius={arc_radius:.1f}")
-
-        # Pre-calculate arc bbox
         arc_rect = arc['path_rect']
         buffer = arc_radius * 0.15
         arc_bbox = (arc_rect[0] - buffer, arc_rect[1] - buffer,
@@ -249,8 +234,6 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             door = classify_swing_door(
                 arc, line, arc_radius, arc_center, debug=debug, arc_idx=arc_idx)
             if door:
-                if debug:
-                    print(f"  ✓ Matched with line {i}")
                 swing_doors.append(door)
                 used_lines.add(i)
                 used_arcs.add(arc_idx)
@@ -294,20 +277,31 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             swing_doors = [door for idx, door in enumerate(
                 swing_doors) if idx not in used_indices]
 
-        if debug and double_doors:
-            print(f"\nFound {len(double_doors)} double door(s)")
+        if debug:
+            for door in double_doors:
+                bbox = door.get('bbox', (0, 0, 0, 0))
+                center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+                print(
+                    f"Double door: center=({int(center[0])}, {int(center[1])})")
+            if double_doors:
+                print(f"Found {len(double_doors)} double door(s)")
 
     # Detect edge double doors from double door candidates
     if double_door_candidates is not None and len(double_door_candidates) >= 2:
         edge_double_doors = classify_edge_double_doors(
-            double_door_candidates, debug=debug)
+            double_door_candidates, debug=False)
         double_doors.extend(edge_double_doors)
-        if debug and edge_double_doors:
-            print(f"Added {len(edge_double_doors)} edge double door(s)")
 
     # Detect bifold doors
     bifold_doors = classify_bifold_doors(
         lines, page_width=page_width, page_height=page_height, debug=debug)
+
+    if debug:
+        for door in swing_doors:
+            center = door.get('center', np.array([0, 0]))
+            print(f"Swing door: center=({int(center[0])}, {int(center[1])})")
+        if swing_doors:
+            print(f"Found {len(swing_doors)} swing door(s)")
 
     return {
         'swing_doors': swing_doors,
@@ -331,11 +325,7 @@ def classify_edge_double_doors(double_door_candidates: List[Dict], debug: bool =
     if len(double_door_candidates) < 2:
         return []
 
-    if debug:
-        print(
-            f"\nChecking {len(double_door_candidates)} double door candidates")
-
-    # Pre-cache arc geometry
+    arc_cache = []
     arc_cache = []
     for arc in double_door_candidates:
         if 'center' in arc and 'radius' in arc:
@@ -427,11 +417,7 @@ def classify_bifold_doors(lines: List[Dict], page_width: float, page_height: flo
     endpoint_tolerance = page_diagonal * 0.0009
     endpoint_tolerance_sq = endpoint_tolerance * endpoint_tolerance
 
-    if debug:
-        print(f"\nProcessing {len(lines)} lines for bifold doors")
-        print(f"  Endpoint tolerance: {endpoint_tolerance:.1f}")
-
-    # Build endpoint map
+    endpoint_map = {}
     endpoint_map = {}
 
     def get_endpoint_key(point):
@@ -505,9 +491,6 @@ def classify_bifold_doors(lines: List[Dict], page_width: float, page_height: flo
             'bisector': bisector,
             'line_indices': (line1_idx, line2_idx)
         })
-
-    if debug:
-        print(f"Found {len(v_candidates)} V-candidates")
 
     if len(v_candidates) < 2:
         return []
@@ -655,6 +638,11 @@ def classify_bifold_doors(lines: List[Dict], page_width: float, page_height: flo
             break
 
     if debug:
-        print(f"Found {len(bifold_doors)} bifold door(s)")
+        for door in bifold_doors:
+            bbox = door.get('bbox', (0, 0, 0, 0))
+            center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+            print(f"Bifold door: center=({int(center[0])}, {int(center[1])})")
+        if bifold_doors:
+            print(f"Found {len(bifold_doors)} bifold door(s)")
 
     return bifold_doors
