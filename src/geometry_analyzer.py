@@ -5,7 +5,7 @@ from typing import List, Dict, Tuple, Optional
 
 
 # ============================================================================
-# UNIVERSAL UTILITY FUNCTIONS
+# UNIVERSAL  FUNCTIONS
 # ============================================================================
 
 def get_bezier_radius(control_points: List) -> Optional[Tuple[float, np.ndarray]]:
@@ -18,7 +18,7 @@ def get_bezier_radius(control_points: List) -> Optional[Tuple[float, np.ndarray]
 
     p0, p1, p2, p3 = [np.array(p) for p in control_points]
 
-    # Calculate point on curve at t=0.5
+    # Calculate midpoint curve
     t = 0.5
     mid = (1-t)**3 * p0 + 3*(1-t)**2 * t * p1 + 3*(1-t) * t**2 * p2 + t**3 * p3
 
@@ -34,7 +34,7 @@ def get_bezier_radius(control_points: List) -> Optional[Tuple[float, np.ndarray]
     area = 0.5 * abs(x1*(y2 - y3) + x2*(y3 - y1) + x3*(y1 - y2))
 
     if area < 1e-5:
-        return None  # Collinear points
+        return None  # Collinear points because triangle forms infinite area
 
     radius = (a * b * c) / (4 * area)
     return (radius, mid)
@@ -45,7 +45,7 @@ def get_bezier_radius(control_points: List) -> Optional[Tuple[float, np.ndarray]
 # ============================================================================
 
 class ArcReconstructor:
-    """Reconstructs tessellated arcs from fragmented line segments."""
+    """Reconstructs  arcs from fragmented line segments"""
 
     def __init__(self, page_width: float, page_height: float, debug: bool = False):
         self.page_width = page_width
@@ -57,19 +57,19 @@ class ArcReconstructor:
         self.gap_tolerance = page_diagonal * 0.0009
 
     def _is_short_segment(self, line: Dict) -> bool:
-        """Check if line is short enough to be a tessellated segment."""
+        """Check if line is short enough to be a tessellated segment"""
         start, end = line['start'], line['end']
         dx, dy = end[0] - start[0], end[1] - start[1]
         length = (dx*dx + dy*dy) ** 0.5
         return self.segment_min_threshold <= length < self.segment_max_threshold
 
     def _squared_distance(self, p1: tuple, p2: tuple) -> float:
-        """Calculate squared distance between two points."""
+        """squared distance between two points"""
         dx, dy = p1[0] - p2[0], p1[1] - p2[1]
         return dx*dx + dy*dy
 
     def _are_connected(self, line1: Dict, line2: Dict) -> bool:
-        """Check if two lines are connected within tolerance."""
+        """Check if two lines are connected within tolerance"""
         threshold_sq = self.gap_tolerance * self.gap_tolerance
         for p1 in [line1['start'], line1['end']]:
             for p2 in [line2['start'], line2['end']]:
@@ -78,7 +78,7 @@ class ArcReconstructor:
         return False
 
     def _continues_smoothly(self, chain: List[Tuple[int, Dict]], new_segment: Dict, add_to_end: bool) -> bool:
-        """Check if new segment continues chain direction smoothly (angle <= 40°)."""
+        """Check if new segment continues chain direction smoothly (angle <= 40°)"""
         if len(chain) == 0:
             return True
 
@@ -122,7 +122,7 @@ class ArcReconstructor:
         return angle_deg <= 40.0
 
     def _would_reverse_curve(self, chain: List[Tuple[int, Dict]], new_segment: Dict, add_to_end: bool) -> bool:
-        """Check if adding new segment would reverse curve direction (>110°)."""
+        """Check if adding new segment would reverse curve direction (>110°)"""
         if len(chain) < 2:
             return False
 
@@ -163,7 +163,7 @@ class ArcReconstructor:
         return angle > 110
 
     def _chain_segments(self, segments: List[Tuple[int, Dict]]) -> List[List[Tuple[int, Dict]]]:
-        """Group connected segments into chains using spatial indexing."""
+        """Group chains using spatial indexing"""
         if not segments:
             return []
 
@@ -187,7 +187,7 @@ class ArcReconstructor:
                 spatial_index[key].append(i)
 
         def get_candidate_indices(segment):
-            """Get candidate segments that might connect using spatial index."""
+            """Get candidate segments using spatial index"""
             candidates = set()
             gap_tolerance_sq = self.gap_tolerance * self.gap_tolerance
 
@@ -267,7 +267,7 @@ class ArcReconstructor:
         return chains
 
     def _collect_chain_points(self, chain: List[Tuple[int, Dict]]) -> List[np.ndarray]:
-        """Collect ordered points from a chain of segments."""
+        """Collect ordered points from a chain of segments"""
         points = []
         current_point = None
 
@@ -296,7 +296,7 @@ class ArcReconstructor:
         return points
 
     def _calculate_detour_index(self, chain: List[Tuple[int, Dict]]) -> float:
-        """Calculate detour index: Total Path Length / Straight Distance."""
+        """ detour index: Total Path Length / Straight Distance"""
         if len(chain) < 2:
             return 1.0
 
@@ -311,7 +311,7 @@ class ArcReconstructor:
         return total_length / straight_distance if straight_distance >= 1e-5 else 1.0
 
     def _fit_circle(self, chain: List[Tuple[int, Dict]]) -> Tuple[Optional[Dict], Optional[str], Optional[Dict]]:
-        """Fit circle to chain of segments. Returns (arc_dict, diagnostic_string, metrics_dict)."""
+        """Fit circle to chain of segments returns (arc_dict, diagnostic_string, metrics_dict)"""
         points = self._collect_chain_points(chain)
 
         if len(points) < 3:
@@ -465,7 +465,6 @@ class ArcReconstructor:
     def reconstruct_arcs(self, lines: List[Dict]) -> Tuple[List[Dict], set, List[Dict]]:
         """
         Reconstruct arcs from tessellated line segments.
-
         Returns:
             Tuple of (reconstructed_arcs, used_line_indices, rejected_chains)
         """
@@ -543,7 +542,7 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
     page_diagonal = np.sqrt(page_width**2 + page_height**2)
     touch_tolerance_sq = (page_diagonal * 0.0023) ** 2
 
-    # Pre-compute arc data
+    # data we need later for arc
     arc_data = []
     for arc in arcs:
         cp = arc.get('control_points')
@@ -569,7 +568,7 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
         arc_data.append({'start': start, 'end': end,
                         'sweep': sweep, 'radius': radius, 'center': center})
 
-    # Build adjacency list
+    #  adjacency list
     n = len(arcs)
     adjacency = [[] for _ in range(n)]
 
@@ -596,7 +595,7 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
                 adjacency[i].append(j)
                 adjacency[j].append(i)
 
-    # Find connected components using BFS
+    #  connected components using BFS
     visited = set()
     arc_indices_to_remove = set()
 
@@ -652,8 +651,7 @@ def _filter_circular_annotation_patterns(arcs: List[Dict], page_width: float, pa
 def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: float, page_height: float, debug: bool = False) -> Tuple[List[Dict], List[Dict]]:
     """
     Filter door candidates by stroke width.
-
-    Removes dust (very short) and extremely long lines/arcs before calculating percentiles.
+    Removes dust (very short) and extremely long lines/arcs before calculating percentiles
     """
     if not lines and not arcs:
         return lines, arcs
@@ -712,14 +710,13 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
 
 
 # ============================================================================
-# MAIN GEOMETRY ANALYSIS
+#  GEOMETRY ANALYSIS
 # ============================================================================
 
 def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dict], page_width: float, page_height: float, debug: bool = False) -> Dict:
     """
-    Analyze geometry to find door candidates.
-
-    Returns dictionary with filtered lines, arcs, and door candidates.
+    Analyze geometry to find door candidates
+    Returns dictionary with filtered lines, arcs, and door candidates
     """
     if debug:
         print(

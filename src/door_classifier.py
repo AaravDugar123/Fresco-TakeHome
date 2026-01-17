@@ -10,7 +10,7 @@ from src.geometry_analyzer import get_bezier_radius
 # ============================================================================
 
 def calculate_arc_sweep_angle(arc: Dict, radius: float) -> Optional[float]:
-    """Calculate the sweep angle (degrees) using chord/radius ratio."""
+    """Calculate the sweep angleusing chord/radius ratio"""
     pts = arc['control_points']
     if len(pts) != 4 or radius <= 0:
         return None
@@ -27,7 +27,7 @@ def calculate_arc_sweep_angle(arc: Dict, radius: float) -> Optional[float]:
 
 
 def _get_bbox_from_rect(rect) -> tuple:
-    """Extract bbox from rect (handles PyMuPDF Rect or tuple/list)."""
+    """Extract bbox from rect using pyMuPDF"""
     if isinstance(rect, (list, tuple)) and len(rect) >= 4:
         return rect
     elif hasattr(rect, 'x0'):
@@ -36,7 +36,7 @@ def _get_bbox_from_rect(rect) -> tuple:
 
 
 def _get_door_bbox_fast(door: Dict) -> tuple:
-    """Fast bbox calculation using path_rect when available."""
+    """Fast bbox calculation using path_rect"""
     arc, line = door['arc'], door['line']
 
     arc_rect = arc.get('path_rect')
@@ -69,7 +69,7 @@ def _get_door_bbox_fast(door: Dict) -> tuple:
 
 
 def check_arcs_touch(arc1: Dict, arc2: Dict, threshold: float) -> Tuple[bool, Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]]:
-    """Check if two arcs touch at endpoints. Returns (touches, endpoint_info)."""
+    """Check if two arcs touch at endpoints Return (touches, endpoint_info)"""
     arc1_start = np.array(arc1['control_points'][0])
     arc1_end = np.array(arc1['control_points'][-1])
     arc2_start = np.array(arc2['control_points'][0])
@@ -96,7 +96,7 @@ def check_arcs_touch(arc1: Dict, arc2: Dict, threshold: float) -> Tuple[bool, Op
 
 
 def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
-    """Check if arc and line touch at endpoints (within 15% of radius)."""
+    """Check if arc and line touch at endpoints"""
     arc_start = np.array(arc['control_points'][0])
     arc_end = np.array(arc['control_points'][-1])
     line_start = np.array(line['start'])
@@ -118,7 +118,7 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
 # ============================================================================
 
 def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np.ndarray, debug: bool = False, arc_idx: int = -1) -> Optional[Dict]:
-    """Classify a single swing door from an arc-line pair."""
+    """Classify a single swing door with arcs and pairs"""
     sweep_angle = calculate_arc_sweep_angle(arc, arc_radius)
     if sweep_angle is None or not (12.5 <= sweep_angle <= 103.5):
         return None
@@ -154,8 +154,7 @@ def classify_swing_door(arc: Dict, line: Dict, arc_radius: float, arc_center: np
 def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = False, page_width: float = None, page_height: float = None, double_door_candidates: List[Dict] = None) -> Dict:
     """
     Classify swing doors from arcs and lines.
-
-    Returns dictionary with 'swing_doors', 'double_doors', and 'bifold_doors' lists.
+    Returns dict with 'swing_doors', 'double_doors', and 'bifold_doors' lists.
     """
     swing_doors = []
     used_lines = set()
@@ -227,7 +226,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
                 cos_angle = np.clip(np.dot(vec_AB, vec_AC) /
                                     (norm_AB * norm_AC), -1.0, 1.0)
                 angle_deg = np.degrees(np.arccos(cos_angle))
-                if angle_deg > 115:  # Arc curves toward line
+                if angle_deg > 115:  #cureves away
                     continue
 
             # Classify swing door
@@ -286,7 +285,7 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
             if double_doors:
                 print(f"Found {len(double_doors)} double door(s)")
 
-    # Detect edge double doors from double door candidates
+    # Detect wide double doors from double door candidates
     if double_door_candidates is not None and len(double_door_candidates) >= 2:
         edge_double_doors = classify_edge_double_doors(
             double_door_candidates, debug=False)
@@ -316,9 +315,8 @@ def classify_swing_doors(arcs: List[Dict], lines: List[Dict], debug: bool = Fals
 
 def classify_edge_double_doors(double_door_candidates: List[Dict], debug: bool = True) -> List[Dict]:
     """
-    Classify edge double doors from double door candidate arcs.
-
-    Edge double doors are two wide arcs (150-210°) that:
+    Classify edge double doors from double door candidate arcs
+    two wide arcs (150-210°) that:
     1. Touch at one set of endpoints (within 0.75 * radius)
     2. Have other endpoints > 1.75 * radius apart
     """
@@ -405,9 +403,9 @@ def classify_bifold_doors(lines: List[Dict], page_width: float, page_height: flo
 
     A bifold door consists of two V-candidates that meet:
     - Distance between joints <= 1.7 * panel_length
-    - Bisector alignment >= 0.88
-    - Angle match <= 20° (or mirrored)
-    - Four free endpoints align on a straight line
+    - parraele alignment >= 0.88
+    - Angle match <= 20°
+    - you can make a line out of it
     """
     if len(lines) < 4:
         return []
@@ -435,7 +433,7 @@ def classify_bifold_doors(lines: List[Dict], page_width: float, page_height: flo
         endpoint_map[start_key].append((line_idx, 'start', start))
         endpoint_map[end_key].append((line_idx, 'end', end))
 
-    # Find V-candidates: endpoints where exactly 2 lines meet
+    # Find V-candidates
     v_candidates = []
 
     for endpoint_key, connections in endpoint_map.items():
@@ -449,7 +447,7 @@ def classify_bifold_doors(lines: List[Dict], page_width: float, page_height: flo
         start1, end1 = np.array(line1['start']), np.array(line1['end'])
         start2, end2 = np.array(line2['start']), np.array(line2['end'])
 
-        # Get vectors pointing away from joint
+        # Get vectors 
         dist1_start = np.sum((start1 - joint_point) ** 2)
         dist1_end = np.sum((end1 - joint_point) ** 2)
         dist2_start = np.sum((start2 - joint_point) ** 2)
@@ -466,18 +464,18 @@ def classify_bifold_doors(lines: List[Dict], page_width: float, page_height: flo
 
         vec1_norm, vec2_norm = vec1 / len1, vec2 / len2
 
-        # Check angle: 25° to 70°
+        # angle check
         dot_product = np.clip(np.dot(vec1_norm, vec2_norm), -1.0, 1.0)
         angle_deg = np.degrees(np.arccos(dot_product))
         if not (25 <= angle_deg <= 70):
             continue
 
-        # Check length similarity: >= 0.65
+        # Check same length
         length_ratio = min(len1, len2) / max(len1, len2)
         if length_ratio < 0.65:
             continue
 
-        # Calculate bisector
+        # bisector or parrelness
         bisector = vec1_norm + vec2_norm
         bisector_norm = np.linalg.norm(bisector)
         if bisector_norm < 1e-5:
@@ -495,7 +493,7 @@ def classify_bifold_doors(lines: List[Dict], page_width: float, page_height: flo
     if len(v_candidates) < 2:
         return []
 
-    # Build spatial index for pairing
+    # spatial graph for speed!
     avg_panel_length = np.mean([v['avg_length'] for v in v_candidates])
     cell_size = avg_panel_length * 0.3
     v_spatial_index = {}
@@ -573,7 +571,7 @@ def classify_bifold_doors(lines: List[Dict], page_width: float, page_height: flo
                 np.array(lines[v2['line_indices'][1]]['end'])
             ]
 
-            # Filter free endpoints (not at joints)
+            # Filter free endpoints 
             joint_tol_sq = (endpoint_tolerance * 3) ** 2
             free_endpoints = []
             for ep in all_eps:
