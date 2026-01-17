@@ -1,4 +1,4 @@
-"""Extract geometric primitives from PDF using PyMuPDF."""
+"""Extract geometric primitives/shapes from PDF using PyMuPDF."""
 import pymupdf
 from typing import List, Dict, Tuple
 
@@ -28,20 +28,19 @@ def extract_vectors(pdf_path: str, page_num: int = 0) -> Dict:
 def extract_primitives(page: pymupdf.Page) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
     Extract all geometric primitives from a PDF page.
-
-    Returns:
+    Returns
         Tuple of (lines, arcs, dashed_lines)
     """
-    paths = page.get_cdrawings()  # signficantly faster than ust get_drawing
+    paths = page.get_cdrawings()  # signficantly faster than just get_drawing
 
     lines = []
     arcs = []
     dashed_lines = []
 
     for path in paths:
-        # Filter: only process stroke paths (doors are drawn with strokes)
+        # only process stroke paths
         path_type = path.get("type", "")
-        if path_type == "f":  # fill-only, skip
+        if path_type == "f":  # skip filled in shapes
             continue
 
         stroke_width = path.get("width", 1)
@@ -56,7 +55,7 @@ def extract_primitives(page: pymupdf.Page) -> Tuple[List[Dict], List[Dict], List
                     "end": item[2],
                     "stroke_width": stroke_width,
                     "is_dashed": is_dashed,
-                    "path_rect": path_rect  # Useful for spatial grouping
+                    "path_rect": path_rect  #
                 }
 
                 if is_dashed:
@@ -64,15 +63,15 @@ def extract_primitives(page: pymupdf.Page) -> Tuple[List[Dict], List[Dict], List
                 else:
                     lines.append(line_data)
 
-            elif item[0] == "c":  # cubic Bezier curve (always 4 points in PyMuPDF)
+            elif item[0] == "c":  # cubic Bezier curve (4 points)
                 p0, p1, p2, p3 = item[1], item[2], item[3], item[4]
 
                 arc_data = {
                     "type": "cubic_bezier",
-                    "control_points": [p0, p1, p2, p3],  # Always 4 points
+                    "control_points": [p0, p1, p2, p3],  
                     "stroke_width": stroke_width,
                     "path_rect": path_rect,
-                    "close_path": close_path  # Store if path is closed (circle)
+                    "close_path": close_path  # Store if path is closed (circle) PyMuPDf doesnt process this right
                 }
                 arcs.append(arc_data)
 
