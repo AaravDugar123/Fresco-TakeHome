@@ -20,7 +20,7 @@ start_time = time.time()
 print("Extracting vectors...")
 result = extract_vectors(str(pdf_path))
 
-# Analyze geometry
+# Get geoemtry
 print("Analyzing geometry...")
 analysis = analyze_geometry(
     result['lines'],
@@ -30,7 +30,7 @@ analysis = analyze_geometry(
     result['page_height']
 )
 
-# Classify swing doors (use pre-filtered candidates to avoid redundant checks)
+# Classify swing doors
 print("Classifying swing doors...")
 door_result = classify_swing_doors(
     analysis['door_candidate_arcs'], 
@@ -57,9 +57,9 @@ page_width = result['page_width']
 page_height = result['page_height']
 label_spacing = 100  # Labels every 100 units
 font_size = 8
-label_offset = 10  # Offset to avoid cutoff
+label_offset = 10  
 
-# X-axis labels (bottom edge) - PDF origin is bottom-left
+# X-axis 
 for x in range(0, int(page_width) + label_spacing, label_spacing):
     if x <= page_width - 20:  # Ensure label fits within page
         page.insert_text(
@@ -69,7 +69,7 @@ for x in range(0, int(page_width) + label_spacing, label_spacing):
             color=(0.5, 0.5, 0.5)
         )
 
-# Y-axis labels (left edge) - PDF origin is bottom-left
+# Y-axis 
 for y in range(0, int(page_height) + label_spacing, label_spacing):
     if y <= page_height - 10:  # Ensure label fits within page
         page.insert_text(
@@ -81,7 +81,7 @@ for y in range(0, int(page_height) + label_spacing, label_spacing):
 
 print(f"  Coordinate labels added: {label_spacing} unit spacing")
 
-# Helper to get door bbox (use fast version from door_classifier)
+# get door bbox
 from src.door_classifier import _get_door_bbox_fast as get_door_bbox
 
 # Draw red rectangles around each swing door
@@ -96,10 +96,10 @@ for i, door in enumerate(swing_doors):
 for i, double_door in enumerate(double_doors):
     min_x, min_y, max_x, max_y = double_door['bbox']
     
-    # Add padding and draw
+    # padding
     padding = 10
     rect = pymupdf.Rect(min_x - padding, min_y - padding, max_x + padding, max_y + padding)
-    page.draw_rect(rect, color=(0, 0, 1), width=2)  # Blue color
+    page.draw_rect(rect, color=(0, 0, 1), width=2)  
     
     print(f"Double door {i}: bbox=({min_x:.1f}, {min_y:.1f}, {max_x:.1f}, {max_y:.1f})")
 
@@ -107,10 +107,9 @@ for i, double_door in enumerate(double_doors):
 for i, bifold_door in enumerate(bifold_doors):
     min_x, min_y, max_x, max_y = bifold_door['bbox']
     
-    # Add padding and draw
     padding = 10
     rect = pymupdf.Rect(min_x - padding, min_y - padding, max_x + padding, max_y + padding)
-    page.draw_rect(rect, color=(0, 1, 0), width=2)  # Green color
+    page.draw_rect(rect, color=(0, 1, 0), width=2)  
     
     print(f"Bifold door {i}: bbox=({min_x:.1f}, {min_y:.1f}, {max_x:.1f}, {max_y:.1f})")
 
@@ -124,6 +123,6 @@ doc.close()
 
 print(f"\nOutput saved to: {output_path}")
 
-# Calculate and print time as the last thing
+# time stats
 total_time = time.time() - start_time
 print(f"Total processing time: {total_time:.2f} seconds")

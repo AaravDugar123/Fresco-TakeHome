@@ -2,7 +2,7 @@
 
 Door detection system for architectural floor plans using a vector-based geometric approach.
 
-## Running Locally
+## How to run locally
 
 1. Install dependencies: `pip install -r requirements.txt`
 2. Start the server: `python server.py`

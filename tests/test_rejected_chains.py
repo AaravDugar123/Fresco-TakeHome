@@ -8,7 +8,6 @@ import pymupdf
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-# Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
     "CopellIndependent_NA02-01_-_FLOOR_PLAN_-LEVEL_ONE_-_CoppellIndependent.pdf_-_Page_30.pdf"
 
@@ -18,7 +17,6 @@ result = extract_vectors(str(pdf_path))
 print(
     f"Extracted: {len(result['lines'])} lines, {len(result['arcs'])} arcs, {len(result['dashed_lines'])} dashed lines")
 
-# Analyze geometry to get rejected chains
 print("\nAnalyzing geometry...")
 analysis = analyze_geometry(
     result['lines'],
@@ -58,9 +56,8 @@ for x in range(0, int(page_width) + label_spacing, label_spacing):
             color=(0.5, 0.5, 0.5)
         )
 
-# Y-axis labels (left edge) - PDF origin is bottom-left
 for y in range(0, int(page_height) + label_spacing, label_spacing):
-    if y <= page_height - 10:  # Ensure label fits within page
+    if y <= page_height - 10:  
         page.insert_text(
             pymupdf.Point(label_offset, y),
             str(y),
@@ -73,37 +70,30 @@ print(f"  Coordinate labels added: {label_spacing} unit spacing")
 # Draw boxes around each rejected chain with coordinates only
 print("\nDrawing rejected chain boxes with coordinates...")
 for chain_info in rejected_chains:
-    bbox = chain_info['bbox']  # (min_x, min_y, max_x, max_y)
-    center = chain_info['center']  # (x, y)
+    bbox = chain_info['bbox']  
+    center = chain_info['center'] 
 
-    # Create a shape for the box
     shape = page.new_shape()
 
-    # Draw rectangle (bbox format: x0, y0, x1, y1)
     rect = pymupdf.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
     shape.draw_rect(rect)
 
-    # Draw in red with 2pt width
     shape.finish(color=(1, 0, 0), width=2.0)
     shape.commit()
 
-    # Determine label position (above or below box)
     if bbox[3] + 30 < page_height:
-        # Label above the box
         label_y = bbox[3] + 10
     else:
-        # Label below the box
         label_y = bbox[1] - 5
 
-    label_x = bbox[0]  # Left edge of box
+    label_x = bbox[0] 
 
-    # Draw only coordinates
     coord_text = f"({center[0]:.1f}, {center[1]:.1f})"
     page.insert_text(
         pymupdf.Point(label_x, label_y),
         coord_text,
         fontsize=9,
-        color=(1, 0, 0),  # Red text
+        color=(1, 0, 0), 
         render_mode=0
     )
 

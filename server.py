@@ -1,5 +1,5 @@
 """Simple Flask web app for PDF door classification."""
-from flask import Flask, request, send_file, render_template_string
+from flask import Flask, request, send_file, render_template_string, jsonify
 from flask_cors import CORS
 import tempfile
 import os
@@ -52,7 +52,21 @@ HTML = """<!DOCTYPE html>
             formData.append('file', file);
             try {
                 const res = await fetch('/process-pdf', { method: 'POST', body: formData });
-                if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Failed'); }
+                if (!res.ok) {
+                    let errorMsg = 'Failed to process PDF';
+                    try {
+                        const contentType = res.headers.get('content-type');
+                        if (contentType && contentType.includes('application/json')) {
+                            const err = await res.json();
+                            errorMsg = err.error || errorMsg;
+                        } else {
+                            errorMsg = `Server error: ${res.status} ${res.statusText}`;
+                        }
+                    } catch (e) {
+                        errorMsg = `Server error: ${res.status} ${res.statusText}`;
+                    }
+                    throw new Error(errorMsg);
+                }
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -81,11 +95,11 @@ def index():
 @app.route('/process-pdf', methods=['POST'])
 def process_pdf():
     if 'file' not in request.files:
-        return {'error': 'No file provided'}, 400
+        return jsonify({'error': 'No file provided'}), 400
     
     file = request.files['file']
     if file.filename == '':
-        return {'error': 'No file selected'}, 400
+        return jsonify({'error': 'No file selected'}), 400
     
     with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_input:
         file.save(tmp_input.name)
@@ -154,7 +168,10 @@ def process_pdf():
     
     except Exception as e:
         import traceback
-        return {'error': str(e) + '\n' + traceback.format_exc()}, 500
+        error_msg = str(e)
+        if app.debug:
+            error_msg += '\n' + traceback.format_exc()
+        return jsonify({'error': error_msg}), 500
     
     finally:
         # Cleanup
