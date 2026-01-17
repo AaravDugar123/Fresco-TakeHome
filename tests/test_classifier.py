@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 #CopellIndependent_NA02-01_-_FLOOR_PLAN_-LEVEL_ONE_-_CoppellIndependent.pdf_-_Page_30.pdf
 # Path relative to project root
 pdf_path = Path(__file__).parent.parent / "Data" / "door_drawings" / \
-    "bifold_doors.pdf"
+    "FirstSource_R25-01360-A-V03.pdf_-_Page_2.pdf"
 
 # Start timing
 start_time = time.time()
@@ -45,8 +45,9 @@ door_result = classify_swing_doors(
 
 swing_doors = door_result['swing_doors']
 double_doors = door_result['double_doors']
+bifold_doors = door_result.get('bifold_doors', [])
 
-print(f"\nFound {len(swing_doors)} swing doors, {len(double_doors)} double doors")
+print(f"\nFound {len(swing_doors)} swing doors, {len(double_doors)} double doors, {len(bifold_doors)} bifold doors")
 
 # Open PDF and draw rectangles
 doc = pymupdf.open(str(pdf_path))
@@ -103,6 +104,17 @@ for i, double_door in enumerate(double_doors):
     page.draw_rect(rect, color=(0, 0, 1), width=2)  # Blue color
     
     print(f"Double door {i}: bbox=({min_x:.1f}, {min_y:.1f}, {max_x:.1f}, {max_y:.1f})")
+
+# Draw green rectangles around each bifold door
+for i, bifold_door in enumerate(bifold_doors):
+    min_x, min_y, max_x, max_y = bifold_door['bbox']
+    
+    # Add padding and draw
+    padding = 10
+    rect = pymupdf.Rect(min_x - padding, min_y - padding, max_x + padding, max_y + padding)
+    page.draw_rect(rect, color=(0, 1, 0), width=2)  # Green color
+    
+    print(f"Bifold door {i}: bbox=({min_x:.1f}, {min_y:.1f}, {max_x:.1f}, {max_y:.1f})")
 
 # Save output
 output_dir = Path(__file__).parent.parent / "Data" / "Output_drawings"

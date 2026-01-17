@@ -886,7 +886,7 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
 
     # Calculate thresholds relative to page size
     page_diagonal = np.sqrt(page_width**2 + page_height**2)
-    MIN_LENGTH = page_diagonal * 0.00325  # 0.5% of page diagonal (dust)
+    MIN_LENGTH = page_diagonal * 0.00375  # 0.5% of page diagonal (dust)
     MAX_LENGTH = page_diagonal * 0.04  # 6% of page diagonal (extremely long)
 
     def line_length(line):
@@ -966,6 +966,12 @@ def analyze_geometry(lines: List[Dict], arcs: List[Dict], dashed_lines: List[Dic
     Returns:
         Dictionary with filtered lines, arcs, and door candidates
     """
+    if debug:
+        print(f"\nDEBUG analyze_geometry: Initial extraction counts:")
+        print(f"  Lines: {len(lines)}")
+        print(f"  Arcs: {len(arcs)}")
+        print(f"  Dashed lines: {len(dashed_lines)}")
+
     # Combine solid and dashed lines - door panels can be either
     all_lines = lines + dashed_lines
 
