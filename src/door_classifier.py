@@ -102,7 +102,7 @@ def check_arc_line_touch(arc: Dict, line: Dict, arc_radius: float) -> bool:
     line_start = np.array(line['start'])
     line_end = np.array(line['end'])
 
-    threshold_sq = (arc_radius * 0.75) ** 2
+    threshold_sq = (arc_radius * 0.3) ** 2
     distances_sq = [
         np.sum((arc_start - line_start) ** 2),
         np.sum((arc_start - line_end) ** 2),
