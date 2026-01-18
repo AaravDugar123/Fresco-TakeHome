@@ -657,7 +657,7 @@ def filter_door_candidates(lines: List[Dict], arcs: List[Dict], page_width: floa
         return lines, arcs
 
     page_diagonal = np.sqrt(page_width**2 + page_height**2)
-    MIN_LENGTH = page_diagonal * 0.00375
+    MIN_LENGTH = page_diagonal * 0.0038
     MAX_LENGTH = page_diagonal * 0.04
 
     def line_length(line):
